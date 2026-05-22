@@ -17,7 +17,8 @@ class MESH:
                  vertex_colors: torch.Tensor | None = None,
                  texture: torch.Tensor | None = None,
                  vertex_counts: torch.Tensor | None = None,
-                 face_counts: torch.Tensor | None = None):
+                 face_counts: torch.Tensor | None = None,
+                 material_props: dict | None = None):
 
         assert (vertex_counts is None) == (face_counts is None), \
             "vertex_counts and face_counts must be provided together (both or neither)"
@@ -30,6 +31,7 @@ class MESH:
         # these hold the real per-item lengths (B,). None means rows are uniform and no slicing is needed.
         self.vertex_counts = vertex_counts
         self.face_counts = face_counts
+        self.material_props = material_props
 
 
 class File3D:

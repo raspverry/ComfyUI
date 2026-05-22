@@ -16,11 +16,12 @@ from comfy.cli_args import args
 from comfy_api.latest import ComfyExtension, IO, Types
 
 
-def pack_variable_mesh_batch(vertices, faces, colors=None, uvs=None, texture=None):
+def pack_variable_mesh_batch(vertices, faces, colors=None, uvs=None, texture=None, material_props=None):
     # Pack lists of (Nᵢ, *) vertex/face/color/uv tensors into padded batched tensors,
     # stashing per-item lengths as runtime attrs so consumers can recover the real slice.
     # colors and uvs are 1:1 with vertices, so they're padded to max_vertices and read with vertex_counts.
     # texture is (B, H, W, 3) — passed through unchanged
+    # material_props is shared across the batch — passed through unchanged
     batch_size = len(vertices)
     max_vertices = max(v.shape[0] for v in vertices)
     max_faces = max(f.shape[0] for f in faces)
@@ -54,7 +55,8 @@ def pack_variable_mesh_batch(vertices, faces, colors=None, uvs=None, texture=Non
 
     return Types.MESH(packed_vertices, packed_faces,
                       uvs=packed_uvs, vertex_colors=packed_colors, texture=texture,
-                      vertex_counts=vertex_counts, face_counts=face_counts)
+                      vertex_counts=vertex_counts, face_counts=face_counts,
+                      material_props=material_props)
 
 
 def get_mesh_batch_item(mesh, index):
@@ -77,7 +79,8 @@ def get_mesh_batch_item(mesh, index):
 
 
 def save_glb(vertices, faces, filepath, metadata=None,
-             uvs=None, vertex_colors=None, texture_image=None):
+             uvs=None, vertex_colors=None, texture_image=None,
+             material_props=None):
     """
     Save PyTorch tensor vertices and faces as a GLB file without external dependencies.
 
@@ -86,15 +89,25 @@ def save_glb(vertices, faces, filepath, metadata=None,
     faces: torch.Tensor of shape (M, 3) - The face indices (triangle faces)
     filepath: str - Output filepath (should end with .glb)
     metadata: dict - Optional asset.extras metadata
-    uvs: torch.Tensor of shape (N, 2) - Optional per-vertex texture coordinates
+    uvs: torch.Tensor of shape (N, 2) - Optional per-vertex texture coordinates in OpenGL/trimesh
+                                        convention (V=0 at bottom of texture). save_glb flips V
+                                        to satisfy the glTF spec convention (V=0 at top) on disk.
     vertex_colors: torch.Tensor of shape (N, 3) or (N, 4) - Optional per-vertex colors in [0, 1]
     texture_image: PIL.Image - Optional baseColor texture, embedded as PNG
+    material_props: dict - Optional PBR factors
     """
 
     # Convert tensors to numpy arrays
     vertices_np = vertices.cpu().numpy().astype(np.float32)
     faces_signed = faces.cpu().numpy().astype(np.int64)
     uvs_np = uvs.cpu().numpy().astype(np.float32) if uvs is not None else None
+    if uvs_np is not None:
+        # MESH stores UVs with V=0 at the bottom of the texture (OpenGL / trimesh / OBJ
+        # convention). glTF stores V=0 at the top of the texture. Flip V here so the
+        # written GLB renders correctly in spec-compliant viewers (Three.js, glTF Sample
+        # Viewer, etc.). Copy first to avoid mutating the caller's tensor-backed array.
+        uvs_np = uvs_np.copy()
+        uvs_np[:, 1] = 1.0 - uvs_np[:, 1]
     colors_np = vertex_colors.cpu().numpy().astype(np.float32) if vertex_colors is not None else None
     if colors_np is not None:
         colors_np = np.clip(colors_np, 0.0, 1.0)
@@ -234,23 +247,53 @@ def save_glb(vertices, faces, filepath, metadata=None,
     textures = []
     samplers = []
     materials = []
-    if texture_png_bytes is not None and "TEXCOORD_0" in primitive_attributes:
-        buffer_views.append({
-            "buffer": 0,
-            "byteOffset": texture_byte_offset,
-            "byteLength": len(texture_buffer),
-        })
-        images.append({"bufferView": len(buffer_views) - 1, "mimeType": "image/png"})
-        samplers.append({"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071})
-        textures.append({"source": 0, "sampler": 0})
-        materials.append({
-            "pbrMetallicRoughness": {
-                "baseColorTexture": {"index": 0, "texCoord": 0},
-                "metallicFactor": 0.0,
-                "roughnessFactor": 1.0,
-            },
-            "doubleSided": True,
-        })
+    write_texture = texture_png_bytes is not None and "TEXCOORD_0" in primitive_attributes
+    if write_texture or material_props:
+        pbr: dict = {}
+        material: dict = {"pbrMetallicRoughness": pbr}
+
+        if write_texture:
+            buffer_views.append({
+                "buffer": 0,
+                "byteOffset": texture_byte_offset,
+                "byteLength": len(texture_buffer),
+            })
+            images.append({"bufferView": len(buffer_views) - 1, "mimeType": "image/png"})
+            samplers.append({"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071})
+            textures.append({"source": 0, "sampler": 0})
+            pbr["baseColorTexture"] = {"index": 0, "texCoord": 0}
+
+        if material_props is None:
+            # Legacy default: matte plastic, double-sided. Kept for backward compatibility
+            # with producers (e.g., VoxelToMesh) that never carried PBR factors.
+            if write_texture:
+                pbr["metallicFactor"] = 0.0
+                pbr["roughnessFactor"] = 1.0
+                material["doubleSided"] = True
+        else:
+            bcf = material_props.get("base_color_factor")
+            if bcf is not None:
+                pbr["baseColorFactor"] = [float(x) for x in bcf]
+            mf = material_props.get("metallic_factor")
+            if mf is not None:
+                pbr["metallicFactor"] = float(mf)
+            rf = material_props.get("roughness_factor")
+            if rf is not None:
+                pbr["roughnessFactor"] = float(rf)
+            ef = material_props.get("emissive_factor")
+            if ef is not None:
+                material["emissiveFactor"] = [float(x) for x in ef]
+            ds = material_props.get("double_sided")
+            if ds is not None:
+                material["doubleSided"] = bool(ds)
+            am = material_props.get("alpha_mode")
+            if am is not None:
+                material["alphaMode"] = str(am)
+            ac = material_props.get("alpha_cutoff")
+            if ac is not None:
+                material["alphaCutoff"] = float(ac)
+
+        materials.append(material)
         primitive["material"] = 0
 
     gltf = {
@@ -358,7 +401,7 @@ class SaveGLB(IO.ComfyNode):
             })
             counter += 1
         else:
-            # Handle Mesh input - save vertices and faces as GLB; carry optional UVs / colors / texture.
+            # Handle Mesh input - save vertices and faces as GLB; carry optional UVs / colors / texture / material props.
             texture_b = getattr(mesh, "texture", None)
             texture_np = None
             if texture_b is not None:
@@ -366,6 +409,7 @@ class SaveGLB(IO.ComfyNode):
                 assert texture_np.ndim == 4 and texture_np.shape[-1] == 3, (
                     f"texture must be (B, H, W, 3) RGB, got shape {tuple(texture_np.shape)}"
                 )
+            material_props = getattr(mesh, "material_props", None)
             for i in range(mesh.vertices.shape[0]):
                 vertices_i, faces_i, v_colors, uvs_i = get_mesh_batch_item(mesh, i)
                 if vertices_i.shape[0] == 0 or faces_i.shape[0] == 0:
@@ -376,7 +420,8 @@ class SaveGLB(IO.ComfyNode):
                 save_glb(vertices_i, faces_i, os.path.join(full_output_folder, f), metadata,
                          uvs=uvs_i,
                          vertex_colors=v_colors,
-                         texture_image=tex_img)
+                         texture_image=tex_img,
+                         material_props=material_props)
                 results.append({
                     "filename": f,
                     "subfolder": subfolder,

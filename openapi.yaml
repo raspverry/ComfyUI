@@ -3578,10 +3578,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/HubLabel"
-
+                $ref: "#/components/schemas/HubLabelListResponse"
         '400':
           description: Bad request (e.g. invalid type parameter)
           content:
@@ -10454,6 +10451,19 @@ components:
           - model
           - custom_node
           description: Label category.
+
+    HubLabelListResponse:
+      type: object
+      x-runtime: [cloud]
+      description: '[cloud-only] Response wrapper for the available Hub label catalog.'
+      required:
+      - labels
+      properties:
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/HubLabelInfo'
+          description: Available labels, optionally filtered by type.
 
     HubProfileSummary:
       type: object

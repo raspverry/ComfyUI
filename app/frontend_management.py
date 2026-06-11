@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 import os
 import re
@@ -208,153 +207,95 @@ class FrontendManager:
     CUSTOM_FRONTENDS_ROOT = str(Path(__file__).parents[1] / "web_custom_versions")
 
     AUTO_MANAGED_VERSION_SPECIFIERS = ("latest", "prerelease")
-    AUTO_MANAGED_METADATA_FILENAME = ".auto_managed.json"
-    _VERSION_DIRNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    AUTO_MANAGED_MARKER_DIRNAME = ".auto_managed"
 
     @classmethod
     def _provider_dir(cls, repo_owner: str, repo_name: str) -> Path:
         return Path(cls.CUSTOM_FRONTENDS_ROOT) / f"{repo_owner}_{repo_name}"
 
     @classmethod
-    def _auto_managed_metadata_path(cls, repo_owner: str, repo_name: str) -> Path:
-        return cls._provider_dir(repo_owner, repo_name) / cls.AUTO_MANAGED_METADATA_FILENAME
-
-    @classmethod
-    def _is_safe_version_dirname(cls, name: str) -> bool:
-        if not isinstance(name, str):
-            return False
-        if name in (".", "..") or "/" in name or "\\" in name or "\x00" in name:
-            return False
-        return bool(cls._VERSION_DIRNAME_PATTERN.match(name))
+    def _auto_managed_marker_dir(cls, repo_owner: str, repo_name: str) -> Path:
+        return cls._provider_dir(repo_owner, repo_name) / cls.AUTO_MANAGED_MARKER_DIRNAME
 
     @classmethod
     def _read_auto_managed_versions(cls, repo_owner: str, repo_name: str) -> list[str]:
-        metadata_path = cls._auto_managed_metadata_path(repo_owner, repo_name)
-        if not metadata_path.exists():
-            return []
-        try:
-            with open(metadata_path, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-        except (OSError, ValueError) as exc:
-            logging.warning(
-                "Could not read frontend auto-managed metadata at %s: %s",
-                metadata_path,
-                exc,
-            )
-            return []
-        if not isinstance(data, dict):
-            logging.warning(
-                "Frontend auto-managed metadata at %s has unexpected shape; ignoring.",
-                metadata_path,
-            )
-            return []
-        versions = data.get("auto_managed", [])
-        if not isinstance(versions, list):
-            return []
-        return [v for v in versions if cls._is_safe_version_dirname(v)]
+        """Return versions ComfyUI auto-downloaded for @latest / @prerelease.
 
-    @classmethod
-    def _write_auto_managed_versions(
-        cls, repo_owner: str, repo_name: str, versions: list[str]
-    ) -> None:
-        metadata_path = cls._auto_managed_metadata_path(repo_owner, repo_name)
-        metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        safe_versions = [v for v in versions if cls._is_safe_version_dirname(v)]
-        payload = {"auto_managed": sorted(set(safe_versions))}
-        tmp_path = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
+        Each tracked version is an empty marker file under the provider's
+        ``.auto_managed`` directory. Because the names come straight from real
+        single-component directory entries, there is no untrusted parsing and no
+        path-traversal surface to defend against.
+        """
+        marker_dir = cls._auto_managed_marker_dir(repo_owner, repo_name)
         try:
-            with open(tmp_path, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, indent=2, sort_keys=True)
-            os.replace(tmp_path, metadata_path)
+            return sorted(entry.name for entry in marker_dir.iterdir() if entry.is_file())
+        except FileNotFoundError:
+            return []
         except OSError as exc:
             logging.warning(
-                "Could not write frontend auto-managed metadata at %s: %s",
-                metadata_path,
+                "Could not read frontend auto-managed markers at %s: %s",
+                marker_dir,
                 exc,
             )
-            if tmp_path.exists():
-                try:
-                    tmp_path.unlink()
-                except OSError:
-                    pass
+            return []
+
+    @classmethod
+    def _mark_auto_managed(cls, repo_owner: str, repo_name: str, version: str) -> None:
+        marker_dir = cls._auto_managed_marker_dir(repo_owner, repo_name)
+        try:
+            marker_dir.mkdir(parents=True, exist_ok=True)
+            (marker_dir / version).touch()
+        except OSError as exc:
+            logging.warning(
+                "Could not record auto-managed frontend version %s: %s",
+                version,
+                exc,
+            )
 
     @classmethod
     def _prune_auto_managed_versions(
         cls, repo_owner: str, repo_name: str, keep_version: str
     ) -> None:
-        tracked = cls._read_auto_managed_versions(repo_owner, repo_name)
-        if not tracked and keep_version is None:
-            return
-
+        """Remove previously auto-downloaded versions other than ``keep_version``."""
         provider_dir = cls._provider_dir(repo_owner, repo_name)
-        try:
-            provider_dir_resolved = provider_dir.resolve()
-        except OSError as exc:
-            logging.warning(
-                "Could not resolve provider directory %s for cleanup: %s",
-                provider_dir,
-                exc,
-            )
-            return
-
-        for stale_version in tracked:
+        for stale_version in cls._read_auto_managed_versions(repo_owner, repo_name):
             if stale_version == keep_version:
                 continue
-            # Re-check even though read already filters: keeps rmtree provably
-            # bounded under provider_dir regardless of caller.
-            if not cls._is_safe_version_dirname(stale_version):
-                logging.warning(
-                    "Refusing to clean up suspicious frontend version name: %r",
-                    stale_version,
-                )
-                continue
+            # stale_version is a single-component marker name, so this is always a
+            # direct child of provider_dir.
             stale_path = provider_dir / stale_version
-            if not stale_path.exists():
-                continue
-            try:
-                stale_resolved = stale_path.resolve()
-            except OSError as exc:
-                logging.warning(
-                    "Could not resolve stale frontend path %s: %s",
-                    stale_path,
-                    exc,
-                )
-                continue
-            if (
-                stale_resolved == provider_dir_resolved
-                or provider_dir_resolved not in stale_resolved.parents
-            ):
-                logging.warning(
-                    "Refusing to remove path outside provider dir: %s (provider=%s)",
-                    stale_resolved,
-                    provider_dir_resolved,
-                )
-                continue
-            try:
-                shutil.rmtree(stale_path)
-                logging.info(
-                    "Removed stale auto-managed frontend version: %s",
-                    stale_path,
-                )
-            except OSError as exc:
-                logging.warning(
-                    "Failed to remove stale frontend version at %s: %s",
-                    stale_path,
-                    exc,
-                )
-
-        new_tracked = [keep_version] if keep_version else []
-        cls._write_auto_managed_versions(repo_owner, repo_name, new_tracked)
+            if stale_path.exists():
+                try:
+                    shutil.rmtree(stale_path)
+                    logging.info(
+                        "Removed stale auto-managed frontend version: %s", stale_path
+                    )
+                except OSError as exc:
+                    logging.warning(
+                        "Failed to remove stale frontend version at %s: %s",
+                        stale_path,
+                        exc,
+                    )
+                    continue
+            cls._untrack_auto_managed_version(repo_owner, repo_name, stale_version)
+        cls._mark_auto_managed(repo_owner, repo_name, keep_version)
 
     @classmethod
     def _untrack_auto_managed_version(
         cls, repo_owner: str, repo_name: str, version: str
     ) -> None:
-        tracked = cls._read_auto_managed_versions(repo_owner, repo_name)
-        if version not in tracked:
+        """Stop auto-managing ``version`` (e.g. the user pinned it); keeps its files."""
+        marker = cls._auto_managed_marker_dir(repo_owner, repo_name) / version
+        try:
+            marker.unlink()
+        except FileNotFoundError:
             return
-        tracked = [v for v in tracked if v != version]
-        cls._write_auto_managed_versions(repo_owner, repo_name, tracked)
+        except OSError as exc:
+            logging.warning(
+                "Could not untrack auto-managed frontend version %s: %s",
+                version,
+                exc,
+            )
 
     @classmethod
     def get_required_frontend_version(cls) -> str:
@@ -526,18 +467,13 @@ comfyui-workflow-templates is not installed.
         is_auto_managed = version in cls.AUTO_MANAGED_VERSION_SPECIFIERS
 
         if version.startswith("v"):
-            expected_path = str(
-                Path(cls.CUSTOM_FRONTENDS_ROOT)
-                / f"{repo_owner}_{repo_name}"
-                / version.lstrip("v")
-            )
+            pinned_version = version.lstrip("v")
+            expected_path = str(cls._provider_dir(repo_owner, repo_name) / pinned_version)
             if os.path.exists(expected_path):
                 logging.info(
                     f"Using existing copy of specific frontend version tag: {repo_owner}/{repo_name}@{version}"
                 )
-                cls._untrack_auto_managed_version(
-                    repo_owner, repo_name, version.lstrip("v")
-                )
+                cls._untrack_auto_managed_version(repo_owner, repo_name, pinned_version)
                 return expected_path
 
         logging.info(
@@ -548,39 +484,46 @@ comfyui-workflow-templates is not installed.
         release = provider.get_release(version)
 
         semantic_version = release["tag_name"].lstrip("v")
-        web_root = str(
-            Path(cls.CUSTOM_FRONTENDS_ROOT) / provider.folder_name / semantic_version
-        )
-        download_succeeded = os.path.exists(web_root)
-        if not download_succeeded:
-            try:
-                os.makedirs(web_root, exist_ok=True)
-                logging.info(
-                    "Downloading frontend(%s) version(%s) to (%s)",
-                    provider.folder_name,
-                    semantic_version,
-                    web_root,
-                )
-                logging.debug(release)
-                download_release_asset_zip(release, destination_path=web_root)
-                download_succeeded = True
-            finally:
-                # Clean up the directory if it is empty, i.e. the download failed
-                if not os.listdir(web_root):
-                    os.rmdir(web_root)
-                    download_succeeded = False
+        web_root = str(cls._provider_dir(repo_owner, repo_name) / semantic_version)
 
-        if download_succeeded:
+        if cls._ensure_release_downloaded(provider, semantic_version, web_root, release):
             if is_auto_managed:
-                cls._prune_auto_managed_versions(
-                    repo_owner, repo_name, semantic_version
-                )
+                cls._prune_auto_managed_versions(repo_owner, repo_name, semantic_version)
             else:
-                cls._untrack_auto_managed_version(
-                    repo_owner, repo_name, semantic_version
-                )
+                cls._untrack_auto_managed_version(repo_owner, repo_name, semantic_version)
 
         return web_root
+
+    @classmethod
+    def _ensure_release_downloaded(
+        cls,
+        provider: "FrontEndProvider",
+        semantic_version: str,
+        web_root: str,
+        release: Release,
+    ) -> bool:
+        """Ensure ``release`` is present at ``web_root``.
+
+        Returns True if the version is available on disk afterwards. A failed
+        download leaves no empty directory behind.
+        """
+        if os.path.exists(web_root):
+            return True
+        try:
+            os.makedirs(web_root, exist_ok=True)
+            logging.info(
+                "Downloading frontend(%s) version(%s) to (%s)",
+                provider.folder_name,
+                semantic_version,
+                web_root,
+            )
+            logging.debug(release)
+            download_release_asset_zip(release, destination_path=web_root)
+        finally:
+            # Clean up the directory if it is empty, i.e. the download failed
+            if not os.listdir(web_root):
+                os.rmdir(web_root)
+        return os.path.isdir(web_root)
 
     @classmethod
     def init_frontend(cls, version_string: str) -> str:

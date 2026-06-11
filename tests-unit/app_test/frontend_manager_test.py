@@ -309,8 +309,10 @@ def _make_version_dir(root, owner, repo, version):
     return folder
 
 
-def test_auto_managed_metadata_roundtrip(custom_frontends_root):
-    FrontendManager._write_auto_managed_versions("o", "r", ["1.0.0", "1.1.0", "1.0.0"])
+def test_auto_managed_markers_roundtrip(custom_frontends_root):
+    FrontendManager._mark_auto_managed("o", "r", "1.0.0")
+    FrontendManager._mark_auto_managed("o", "r", "1.1.0")
+    FrontendManager._mark_auto_managed("o", "r", "1.0.0")  # idempotent
     assert FrontendManager._read_auto_managed_versions("o", "r") == ["1.0.0", "1.1.0"]
 
 
@@ -318,61 +320,26 @@ def test_read_auto_managed_versions_missing(custom_frontends_root):
     assert FrontendManager._read_auto_managed_versions("o", "r") == []
 
 
-def test_read_auto_managed_versions_corrupt(custom_frontends_root):
+def test_mark_auto_managed_does_not_create_version_dir(custom_frontends_root):
+    FrontendManager._mark_auto_managed("o", "r", "1.0.0")
+
     provider_dir = custom_frontends_root / "o_r"
-    provider_dir.mkdir()
-    (provider_dir / FrontendManager.AUTO_MANAGED_METADATA_FILENAME).write_text(
-        "not json"
-    )
-    assert FrontendManager._read_auto_managed_versions("o", "r") == []
-
-
-@pytest.mark.parametrize("payload", ["[]", "null", '"oops"', "42"])
-def test_read_auto_managed_versions_non_dict_root(custom_frontends_root, payload):
-    provider_dir = custom_frontends_root / "o_r"
-    provider_dir.mkdir()
-    (provider_dir / FrontendManager.AUTO_MANAGED_METADATA_FILENAME).write_text(payload)
-    assert FrontendManager._read_auto_managed_versions("o", "r") == []
-
-
-def test_read_auto_managed_versions_drops_unsafe_names(custom_frontends_root):
-    provider_dir = custom_frontends_root / "o_r"
-    provider_dir.mkdir()
-    (provider_dir / FrontendManager.AUTO_MANAGED_METADATA_FILENAME).write_text(
-        '{"auto_managed": ["1.0.0", "../escape", "/etc", "..", ".", "ok-1.2"]}'
-    )
-    assert FrontendManager._read_auto_managed_versions("o", "r") == ["1.0.0", "ok-1.2"]
-
-
-def test_write_auto_managed_versions_drops_unsafe_names(custom_frontends_root):
-    FrontendManager._write_auto_managed_versions(
-        "o", "r", ["1.0.0", "../escape", "/etc/passwd", "..", "."]
-    )
+    # The marker is recorded, but no version directory is created as a side effect.
+    assert not (provider_dir / "1.0.0").exists()
     assert FrontendManager._read_auto_managed_versions("o", "r") == ["1.0.0"]
 
 
-def test_prune_refuses_to_delete_outside_provider_dir(
-    custom_frontends_root, monkeypatch
-):
-    sibling = custom_frontends_root / "do-not-touch"
-    sibling.mkdir()
-    (sibling / "marker").write_text("keep me")
+def test_prune_only_touches_marked_siblings(custom_frontends_root):
+    # A sibling provider directory must never be affected by pruning.
+    sibling = _make_version_dir(custom_frontends_root, "other", "repo", "9.9.9")
 
-    provider_dir = custom_frontends_root / "o_r"
-    provider_dir.mkdir()
     _make_version_dir(custom_frontends_root, "o", "r", "1.0.0")
-
-    monkeypatch.setattr(
-        FrontendManager,
-        "_read_auto_managed_versions",
-        classmethod(lambda cls, owner, repo: ["1.0.0", "../do-not-touch"]),
-    )
+    FrontendManager._mark_auto_managed("o", "r", "1.0.0")
 
     FrontendManager._prune_auto_managed_versions("o", "r", keep_version="2.0.0")
 
     assert sibling.exists()
-    assert (sibling / "marker").read_text() == "keep me"
-    assert not (provider_dir / "1.0.0").exists()
+    assert not (custom_frontends_root / "o_r" / "1.0.0").exists()
 
 
 def test_prune_auto_managed_versions_removes_stale_and_keeps_pinned(
@@ -381,7 +348,8 @@ def test_prune_auto_managed_versions_removes_stale_and_keeps_pinned(
     _make_version_dir(custom_frontends_root, "o", "r", "1.0.0")
     _make_version_dir(custom_frontends_root, "o", "r", "1.1.0")
     pinned = _make_version_dir(custom_frontends_root, "o", "r", "1.2.0")
-    FrontendManager._write_auto_managed_versions("o", "r", ["1.0.0", "1.1.0"])
+    FrontendManager._mark_auto_managed("o", "r", "1.0.0")
+    FrontendManager._mark_auto_managed("o", "r", "1.1.0")
 
     FrontendManager._prune_auto_managed_versions("o", "r", keep_version="1.1.0")
 
@@ -394,12 +362,18 @@ def test_prune_auto_managed_versions_removes_stale_and_keeps_pinned(
 
 def test_untrack_auto_managed_version_does_not_delete_folder(custom_frontends_root):
     version_dir = _make_version_dir(custom_frontends_root, "o", "r", "1.0.0")
-    FrontendManager._write_auto_managed_versions("o", "r", ["1.0.0", "1.1.0"])
+    FrontendManager._mark_auto_managed("o", "r", "1.0.0")
+    FrontendManager._mark_auto_managed("o", "r", "1.1.0")
 
     FrontendManager._untrack_auto_managed_version("o", "r", "1.0.0")
 
     assert version_dir.exists()
     assert FrontendManager._read_auto_managed_versions("o", "r") == ["1.1.0"]
+
+
+def test_untrack_auto_managed_version_missing_is_noop(custom_frontends_root):
+    FrontendManager._untrack_auto_managed_version("o", "r", "1.0.0")
+    assert FrontendManager._read_auto_managed_versions("o", "r") == []
 
 
 def test_init_frontend_latest_prunes_previous_auto_managed_versions(
@@ -409,9 +383,7 @@ def test_init_frontend_latest_prunes_previous_auto_managed_versions(
     pinned = _make_version_dir(
         custom_frontends_root, "test-owner", "test-repo", "1.1.5"
     )
-    FrontendManager._write_auto_managed_versions(
-        "test-owner", "test-repo", ["1.0.0"]
-    )
+    FrontendManager._mark_auto_managed("test-owner", "test-repo", "1.0.0")
 
     def fake_download(release, destination_path):
         Path(destination_path).mkdir(parents=True, exist_ok=True)
@@ -439,9 +411,7 @@ def test_init_frontend_explicit_version_promotes_out_of_auto_managed(
     custom_frontends_root, mock_provider
 ):
     _make_version_dir(custom_frontends_root, "test-owner", "test-repo", "1.0.0")
-    FrontendManager._write_auto_managed_versions(
-        "test-owner", "test-repo", ["1.0.0"]
-    )
+    FrontendManager._mark_auto_managed("test-owner", "test-repo", "1.0.0")
 
     result = FrontendManager.init_frontend_unsafe(
         "test-owner/test-repo@v1.0.0", mock_provider
@@ -459,9 +429,7 @@ def test_init_frontend_explicit_no_v_prefix_promotes_out_of_auto_managed(
     custom_frontends_root, mock_provider
 ):
     _make_version_dir(custom_frontends_root, "test-owner", "test-repo", "1.0.0")
-    FrontendManager._write_auto_managed_versions(
-        "test-owner", "test-repo", ["1.0.0"]
-    )
+    FrontendManager._mark_auto_managed("test-owner", "test-repo", "1.0.0")
 
     with patch(
         "app.frontend_management.download_release_asset_zip"

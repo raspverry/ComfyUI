@@ -1314,6 +1314,16 @@ class DynamicGroup(ComfyTypeI):
             assert len(field_ids) == len(set(field_ids)), (
                 f"DynamicGroup template field ids must be unique within a row. Got: {field_ids}"
             )
+            # Reject "." in group id and template field ids: slot_id encoding uses "." as a
+            # delimiter (<group_id>.<row>.<field_id>), so any "." in these names would cause
+            # path.split(".") to produce the wrong number of segments during decoding.
+            assert "." not in id, (
+                f"DynamicGroup id must not contain '.'. Got: '{id}'"
+            )
+            for t in template:
+                assert "." not in t.id, (
+                    f"DynamicGroup template field id must not contain '.'. Got: '{t.id}'"
+                )
             assert min >= 0, "DynamicGroup min must be >= 0."
             assert max >= 1, "DynamicGroup max must be >= 1."
             assert max <= DynamicGroup._MaxRows, f"DynamicGroup max must be <= {DynamicGroup._MaxRows}."

@@ -1070,7 +1070,7 @@ class AddNoise(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="AddNoise",
-            category="experimental/custom_sampling/noise",
+            category="experimental/custom_sampling",
             is_experimental=True,
             inputs=[
                 io.Model.Input("model"),

@@ -251,11 +251,7 @@ class PromptServer():
             else args.front_end_root
         )
         logging.info(f"[Prompt Server] web root: {self.web_root}")
-        if args.enable_assets:
-            register_assets_routes(self.app, self.user_manager)
-        else:
-            register_assets_routes(self.app)
-            asset_seeder.disable()
+        register_assets_routes(self.app, self.user_manager)
         routes = web.RouteTableDef()
         self.routes = routes
         self.last_node_id = None
@@ -437,20 +433,19 @@ class PromptServer():
 
                 resp = {"name" : filename, "subfolder": subfolder, "type": image_upload_type}
 
-                if args.enable_assets:
-                    try:
-                        tag = image_upload_type if image_upload_type in ("input", "output") else "input"
-                        result = register_file_in_place(abs_path=filepath, name=filename, tags=[tag])
-                        resp["asset"] = {
-                            "id": result.ref.id,
-                            "name": result.ref.name,
-                            "asset_hash": result.asset.hash,
-                            "size": result.asset.size_bytes,
-                            "mime_type": result.asset.mime_type,
-                            "tags": result.tags,
-                        }
-                    except Exception:
-                        logging.warning("Failed to register uploaded image as asset", exc_info=True)
+                try:
+                    tag = image_upload_type if image_upload_type in ("input", "output") else "input"
+                    result = register_file_in_place(abs_path=filepath, name=filename, tags=[tag])
+                    resp["asset"] = {
+                        "id": result.ref.id,
+                        "name": result.ref.name,
+                        "asset_hash": result.asset.hash,
+                        "size": result.asset.size_bytes,
+                        "mime_type": result.asset.mime_type,
+                        "tags": result.tags,
+                    }
+                except Exception:
+                    logging.warning("Failed to register uploaded image as asset", exc_info=True)
 
                 return web.json_response(resp)
             else:

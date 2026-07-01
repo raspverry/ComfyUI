@@ -294,7 +294,9 @@ def list_references_page(
         escaped, esc = escape_sql_like_string(name_contains)
         base = base.where(AssetReference.name.ilike(f"%{escaped}%", escape=esc))
 
-    if asset_hash:
+    # `is not None` (not truthiness): an explicit empty hash is an exact-match
+    # miss (empty page), while an omitted hash (None) disables the filter.
+    if asset_hash is not None:
         base = base.where(Asset.hash == asset_hash)
 
     base = apply_tag_filters(base, include_tags, exclude_tags)
@@ -349,7 +351,7 @@ def list_references_page(
         count_stmt = count_stmt.where(
             AssetReference.name.ilike(f"%{escaped}%", escape=esc)
         )
-    if asset_hash:
+    if asset_hash is not None:
         count_stmt = count_stmt.where(Asset.hash == asset_hash)
     count_stmt = apply_tag_filters(count_stmt, include_tags, exclude_tags)
     count_stmt = apply_metadata_filter(count_stmt, metadata_filter)

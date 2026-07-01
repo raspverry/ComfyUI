@@ -59,9 +59,11 @@ class ListAssetsQuery(BaseModel):
     # is `asset_hash`; the query param is `hash`).
     hash: str | None = None
 
-    # Declared for cloud/core contract parity. Core has no public asset pool, so
-    # this is inert: results are always the caller's own assets. Accepted (not
-    # rejected) so the FE needs no isCloud branch.
+    # Declared for cloud/core contract parity. In core, reads are owner-scoped
+    # (owner_id == "") and there is no separate shared/public pool for this flag
+    # to include or exclude, so it is inert here and intentionally not threaded
+    # into the query. Accepted (not rejected) so the FE needs no isCloud branch;
+    # cloud enforces the flag in its own service layer.
     include_public: bool = True
 
     # Accept either a JSON string (query param) or a dict
@@ -102,9 +104,11 @@ class ListAssetsQuery(BaseModel):
         # Normalize for an exact match against stored hashes (which are
         # lowercase `blake3:<hex>`). Liberal in what we accept — no pattern
         # enforcement; a non-matching value simply yields an empty page.
+        # An explicitly-supplied-but-empty value (`?hash=`) stays `""` so it
+        # is treated as an exact-match miss (empty page), not silently dropped
+        # to "no filter" — omit the param entirely to disable the filter.
         if isinstance(v, str):
-            v = v.strip().lower()
-            return v or None
+            return v.strip().lower()
         return v
 
     @field_validator("metadata_filter", mode="before")

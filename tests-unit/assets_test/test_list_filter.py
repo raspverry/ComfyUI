@@ -368,6 +368,51 @@ def test_list_assets_hash_filter_no_match(http, api_base, asset_factory, make_as
     assert body["total"] == 0
 
 
+def test_list_assets_hash_filter_normalizes_case_and_whitespace(
+    http, api_base, asset_factory, make_asset_bytes
+):
+    """`hash` is trimmed and lowercased before matching, so an upper-cased,
+    space-padded value still matches the stored lowercase hash."""
+    scope = f"lf-hashnorm-{uuid.uuid4().hex[:6]}"
+    tags = ["models", "checkpoints", "unit-tests", scope]
+    a = asset_factory("hnorm_a.safetensors", tags, {}, make_asset_bytes("hnorm_a", 1024))
+
+    target = a["hash"]
+    assert target == target.lower(), "stored hash is expected to be lowercase"
+    messy = f"  {target.upper()}  "
+
+    r = http.get(
+        api_base + "/api/assets",
+        params={"hash": messy, "limit": "50"},
+        timeout=120,
+    )
+    body = r.json()
+    assert r.status_code == 200, body
+    names = [x["name"] for x in body["assets"]]
+    assert names == [a["name"]]
+    assert body["total"] == 1
+
+
+def test_list_assets_hash_filter_empty_returns_empty_page(
+    http, api_base, asset_factory, make_asset_bytes
+):
+    """An explicitly-supplied but empty `hash` (`?hash=`) is an exact-match miss
+    and returns an empty page, rather than silently disabling the filter."""
+    scope = f"lf-hashempty-{uuid.uuid4().hex[:6]}"
+    tags = ["models", "checkpoints", "unit-tests", scope]
+    asset_factory("he_a.safetensors", tags, {}, make_asset_bytes("he_a", 800))
+
+    r = http.get(
+        api_base + "/api/assets",
+        params={"hash": "", "limit": "50"},
+        timeout=120,
+    )
+    body = r.json()
+    assert r.status_code == 200, body
+    assert body["assets"] == []
+    assert body["total"] == 0
+
+
 def test_list_assets_include_public_accepted(http, api_base, asset_factory, make_asset_bytes):
     """`include_public` is accepted for contract parity; core results are always
     the caller's own assets regardless of its value (the param is inert)."""

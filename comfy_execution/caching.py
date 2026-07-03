@@ -8,6 +8,7 @@ from typing import Sequence, Mapping, Dict
 from comfy.model_patcher import ModelPatcher
 from comfy_execution.graph import DynamicPrompt
 from abc import ABC, abstractmethod
+import gc
 
 import nodes
 
@@ -553,11 +554,15 @@ class RAMPressureCache(LRUCache):
             oom_score *= ram_usage
             #In the case where we have no information on the node ram usage at all,
             #break OOM score ties on the last touch timestamp (pure LRU)
-            bisect.insort(clean_list, (oom_score, self.timestamps[key], key))
+            bisect.insort(clean_list, (oom_score, self.timestamps[key], ram_usage, key))
 
-        while psutil.virtual_memory().available < target and clean_list:
-            _, _, key = clean_list.pop()
+        to_free = target - psutil.virtual_memory().available
+        while to_free > 0 and clean_list:
+            oom_score, _, ram_usage, key = clean_list.pop()
             del self.cache[key]
             self.used_generation.pop(key, None)
             self.timestamps.pop(key, None)
             self.children.pop(key, None)
+            to_free -= ram_usage
+
+        gc.collect()

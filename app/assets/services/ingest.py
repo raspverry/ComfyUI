@@ -245,7 +245,7 @@ def ingest_existing_file(
             "mtime_ns": mtime_ns,
             "info_name": name,
             "tags": tags,
-            "fname": os.path.basename(abs_path),
+            "fname": compute_loader_path(abs_path),
             "metadata": None,
             "hash": None,
             "mime_type": mime_type,

@@ -329,6 +329,45 @@ class TestIngestExistingFileTagFK:
             assert "output" in ref_tag_names
 
 
+class TestIngestExistingFileLoaderPath:
+    """Outputs saved into a subfolder must persist the subfolder-qualified
+    loader path, not the bare basename (regression: spec["fname"] was
+    os.path.basename)."""
+
+    def test_subfoldered_output_persists_relative_loader_path(
+        self, mock_create_session, temp_dir: Path, session: Session
+    ):
+        input_dir = temp_dir / "input"
+        output_dir = temp_dir / "output"
+        temp_root = temp_dir / "temp"
+        for directory in (input_dir, output_dir, temp_root):
+            directory.mkdir()
+        file_path = output_dir / "sub" / "img_00001_.png"
+        file_path.parent.mkdir()
+        file_path.write_bytes(b"image data")
+
+        with (
+            patch("app.assets.services.path_utils.folder_paths") as mock_fp,
+            patch(
+                "app.assets.services.path_utils.get_comfy_models_folders",
+                return_value=[],
+            ),
+        ):
+            mock_fp.get_input_directory.return_value = str(input_dir)
+            mock_fp.get_output_directory.return_value = str(output_dir)
+            mock_fp.get_temp_directory.return_value = str(temp_root)
+
+            assert ingest_existing_file(abs_path=str(file_path)) is True
+
+        ref = (
+            session.query(AssetReference)
+            .filter_by(file_path=str(file_path))
+            .one()
+        )
+        assert ref.loader_path == "sub/img_00001_.png"
+        assert (ref.user_metadata or {}).get("filename") == "sub/img_00001_.png"
+
+
 class TestIngestImageDimensions:
     """system_metadata should carry {kind, width, height} for image assets."""
 

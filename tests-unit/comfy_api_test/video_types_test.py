@@ -595,6 +595,61 @@ def test_save_to_transcode_irregular_vfr_keeps_span():
     assert trimmed["video_seconds"] == pytest.approx(10.0, abs=0.05)
 
 
+def test_save_to_transcode_trim_survives_missing_leading_pts():
+    """A trim should survive pts-less kept frames followed by a real-pts frame past the window."""
+    nulled_frames = 0
+
+    class _PacketProxy:
+        def __init__(self, packet):
+            self._packet = packet
+
+        def __getattr__(self, name):
+            return getattr(self._packet, name)
+
+        @property
+        def stream(self):
+            return self._packet.stream
+
+        def decode(self):
+            nonlocal nulled_frames
+            frames = self._packet.decode()
+            for frame in frames:
+                if nulled_frames < 2:
+                    frame.pts = None
+                    nulled_frames += 1
+            return frames
+
+    class _ContainerProxy:
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def demux(self, *streams):
+            for packet in self._real.demux(*streams):
+                yield _PacketProxy(packet)
+
+    file_path = create_transcode_source(frames=10, audio_streams=0)
+    try:
+        buffer = io.BytesIO()
+        with av.open(file_path) as container:
+            # 0.05 s window: both pts-less frames are kept (synthesized pts 0 and 512),
+            # and the first real-pts frame (1024 ticks) already lies past end_pts (768)
+            VideoFromFile(file_path, duration=0.05)._save_transcoded(
+                _ContainerProxy(container), buffer, VideoContainer.MP4, VideoCodec.H264, None, 8
+            )
+        assert nulled_frames == 2
+        buffer.seek(0)
+        with av.open(buffer) as container:
+            video_stream = container.streams.video[0]
+            frames = [f for p in container.demux(video_stream) for f in p.decode()]
+            assert len(frames) == 2
+            assert float(video_stream.duration * video_stream.time_base) == pytest.approx(2 / 30, abs=0.01)
+    finally:
+        os.unlink(file_path)
+
+
 def test_save_to_transcode_bakes_rotation():
     """A 90-degree display-matrix rotation swaps the output dimensions (portrait video)"""
     file_path = create_transcode_source(width=64, height=32, rotation=True)

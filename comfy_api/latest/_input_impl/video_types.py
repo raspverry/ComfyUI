@@ -626,7 +626,8 @@ class VideoFromFile(VideoInput):
                             video_done = True
                             if last_video_pts is not None:
                                 # the source continues past the window: hold the last kept frame to the window end
-                                last_video_end = max(last_video_end, end_pts - video_pts_offset)
+                                end_offset = video_pts_offset if video_pts_offset is not None else start_pts
+                                last_video_end = max(last_video_end, end_pts - end_offset)
                             break
                         # the source's true display duration of this frame; average_rate is not a
                         # frame duration (sparse/VFR sources), so it is only the fallback

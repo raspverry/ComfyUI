@@ -564,6 +564,78 @@ def test_save_to_transcode_sparse_video_keeps_true_duration():
     assert trimmed["audio_seconds"] == pytest.approx(45.0, abs=0.1)
 
 
+def test_save_to_transcode_clamps_final_pts_to_declared_stream_duration():
+    """Some iPhone MOVs report a video stream duration that ends before the final
+    decoded frame's nominal duration. A transcode must not turn that trailing
+    timestamp quirk into an extra frame interval compared to the source/remux path."""
+    fps = 30
+    buffer = io.BytesIO()
+    with av.open(buffer, mode="w", format="mp4") as container:
+        video_stream = container.add_stream("mpeg4", rate=fps)
+        video_stream.width = video_stream.height = 64
+        video_stream.pix_fmt = "yuv420p"
+        for i, pts in enumerate([*range(31), 32]):
+            frame = av.VideoFrame.from_ndarray(
+                torch.full((64, 64, 3), (i * 7) % 256, dtype=torch.uint8).numpy(), format="rgb24"
+            ).reformat(format="yuv420p")
+            frame.pts = pts
+            frame.time_base = Fraction(1, fps)
+            container.mux(video_stream.encode(frame))
+        container.mux(video_stream.encode(None))
+
+    class _StreamProxy:
+        def __init__(self, stream, duration):
+            self._stream = stream
+            self.duration = duration
+
+        def __getattr__(self, name):
+            return getattr(self._stream, name)
+
+    class _StreamsProxy:
+        def __init__(self, video_stream):
+            self.video = [video_stream]
+            self.audio = []
+
+    class _PacketProxy:
+        def __init__(self, packet, stream):
+            self._packet = packet
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self._packet, name)
+
+    class _ContainerProxy:
+        def __init__(self, container, stream):
+            self._container = container
+            self._stream = stream
+            self.streams = _StreamsProxy(stream)
+
+        def __getattr__(self, name):
+            return getattr(self._container, name)
+
+        def demux(self, *streams):
+            for packet in self._container.demux(self._stream._stream):
+                yield _PacketProxy(packet, self._stream)
+
+    buffer.seek(0)
+    output = io.BytesIO()
+    with av.open(buffer) as container:
+        real_stream = container.streams.video[0]
+        declared_duration = 32 * int(round((1 / fps) / real_stream.time_base))
+        stream = _StreamProxy(real_stream, declared_duration)
+        VideoFromFile(buffer)._save_transcoded(
+            _ContainerProxy(container, stream), output, VideoContainer.MP4, VideoCodec.H264, None, 8
+        )
+
+    output.seek(0)
+    with av.open(output) as container:
+        video_stream = container.streams.video[0]
+        frames = [f for p in container.demux(video_stream) for f in p.decode()]
+        assert len(frames) == 32
+        assert float(video_stream.duration * video_stream.time_base) == pytest.approx(32 / fps, abs=0.01)
+        assert float(frames[-1].pts * frames[-1].time_base) == pytest.approx(31 / fps, abs=0.01)
+
+
 def test_save_to_transcode_irregular_vfr_keeps_span():
     """B-frames reorder packets, and mp4 sample durations follow decode order: the dts
     timeline ends before the pts timeline, so an irregular-VFR source's tail holds fell

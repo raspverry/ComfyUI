@@ -521,6 +521,12 @@ class VideoFromFile(VideoInput):
         start_time, duration = self.get_active_trim_window()
         start_pts = int(start_time / video_stream.time_base)
         end_pts = int((start_time + duration) / video_stream.time_base) if duration else None
+        stream_end_pts = None
+        if video_stream.duration is not None:
+            stream_end_pts = (video_stream.start_time or 0) + video_stream.duration
+        output_end_pts = end_pts
+        if stream_end_pts is not None and (output_end_pts is None or stream_end_pts < output_end_pts):
+            output_end_pts = stream_end_pts
         if start_pts != 0:
             container.seek(start_pts, stream=video_stream)
 
@@ -686,14 +692,29 @@ class VideoFromFile(VideoInput):
                             frame = frame.reformat(format=pix_fmt, src_color_range="JPEG", dst_color_range="MPEG")
                         else:
                             frame = frame.reformat(format=pix_fmt)
+                        frame_output_end = None
                         if frame.pts is not None:
                             if video_pts_offset is None:
                                 video_pts_offset = frame.pts
                             frame.pts -= video_pts_offset
+                            if output_end_pts is not None:
+                                frame_output_end = output_end_pts - video_pts_offset
+                                if frame.pts + frame_duration > frame_output_end:
+                                    clamped_pts = frame_output_end - frame_duration
+                                    if clamped_pts >= 0 and (last_video_pts is None or clamped_pts > last_video_pts):
+                                        frame.pts = min(frame.pts, clamped_pts)
+                                    elif frame.pts < frame_output_end:
+                                        frame_duration = frame_output_end - frame.pts
+                                    else:
+                                        continue
                         if frame.pts is None or (last_video_pts is not None and frame.pts <= last_video_pts):
                             # broken sources emit missing/backward timestamps mid-stream, which the
                             # muxer rejects; nudge them forward by one nominal frame interval
                             frame.pts = 0 if last_video_pts is None else last_video_pts + pts_step
+                            if frame_output_end is not None and frame.pts + frame_duration > frame_output_end:
+                                if frame.pts >= frame_output_end:
+                                    continue
+                                frame_duration = frame_output_end - frame.pts
                         last_video_pts = frame.pts
                         last_video_end = frame.pts + frame_duration
                         video_frame_durations[frame.pts] = frame_duration

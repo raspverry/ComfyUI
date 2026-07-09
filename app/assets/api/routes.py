@@ -10,6 +10,7 @@ from typing import Any
 from aiohttp import web
 from pydantic import ValidationError
 
+import folder_paths
 from app import user_manager
 from app.assets.api import schemas_in, schemas_out
 from app.assets.services import schemas

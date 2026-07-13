@@ -135,6 +135,41 @@ class TestSyncError(ComfyNodeABC):
         raise RuntimeError("Intentional sync execution error for testing")
 
 
+class TestOOMError(ComfyNodeABC):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"value": (IO.ANY, {})}}
+
+    RETURN_TYPES = (IO.ANY,)
+    FUNCTION = "oom_error"
+    CATEGORY = "experimental/async"
+
+    def oom_error(self, value):
+        raise torch.OutOfMemoryError("Intentional out of memory error for testing")
+
+
+class TestMixedExpansionFailure(ComfyNodeABC):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"value": ("INT", {})}}
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "expand"
+    CATEGORY = "experimental/async"
+
+    def expand(self, value):
+        image = torch.zeros([1, 32, 32, 3])
+        if value == 0:
+            return (image,)
+
+        graph = GraphBuilder()
+        error = graph.node("TestSyncError", value=image)
+        return {
+            "result": (error.out(0),),
+            "expand": graph.finalize(),
+        }
+
+
 class TestAsyncLazyCheck(ComfyNodeABC):
     """Test node with async check_lazy_status."""
 
@@ -322,6 +357,8 @@ ASYNC_TEST_NODE_CLASS_MAPPINGS = {
     "TestAsyncValidationError": TestAsyncValidationError,
     "TestAsyncTimeout": TestAsyncTimeout,
     "TestSyncError": TestSyncError,
+    "TestOOMError": TestOOMError,
+    "TestMixedExpansionFailure": TestMixedExpansionFailure,
     "TestAsyncLazyCheck": TestAsyncLazyCheck,
     "TestDynamicAsyncGeneration": TestDynamicAsyncGeneration,
     "TestAsyncResourceUser": TestAsyncResourceUser,
@@ -335,6 +372,8 @@ ASYNC_TEST_NODE_DISPLAY_NAME_MAPPINGS = {
     "TestAsyncValidationError": "Test Async Validation Error",
     "TestAsyncTimeout": "Test Async Timeout",
     "TestSyncError": "Test Sync Error",
+    "TestOOMError": "Test OOM Error",
+    "TestMixedExpansionFailure": "Test Mixed Expansion Failure",
     "TestAsyncLazyCheck": "Test Async Lazy Check",
     "TestDynamicAsyncGeneration": "Test Dynamic Async Generation",
     "TestAsyncResourceUser": "Test Async Resource User",

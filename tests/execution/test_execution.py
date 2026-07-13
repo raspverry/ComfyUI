@@ -13,7 +13,34 @@ import uuid
 import urllib.request
 import urllib.parse
 import urllib.error
+from comfy_execution.graph import DynamicPrompt, ExecutionList
 from comfy_execution.graph_utils import GraphBuilder, Node
+
+
+def test_execution_list_transient_cache_is_prompt_scoped():
+    class OutputCache:
+        def __init__(self):
+            self.values = {}
+            self.set_calls = []
+
+        def get_local(self, node_id):
+            return self.values.get(node_id)
+
+        def set_local(self, node_id, value):
+            self.set_calls.append((node_id, value))
+            self.values[node_id] = value
+
+    output_cache = OutputCache()
+    execution_list = ExecutionList(DynamicPrompt({}), output_cache)
+    failure_entry = object()
+
+    execution_list.cache_update("failed", failure_entry, transient=True)
+    execution_list.cache_link("failed", "late_consumer")
+
+    assert execution_list.is_cached("failed")
+    assert execution_list.get_cache("failed", "late_consumer") is failure_entry
+    assert output_cache.set_calls == []
+    assert not ExecutionList(DynamicPrompt({}), output_cache).is_cached("failed")
 
 def run_warmup(client, prefix="warmup"):
     """Run a simple workflow to warm up the server."""
@@ -28,6 +55,9 @@ class RunResult:
         self.runs: Dict[str,bool] = {}
         self.cached: Dict[str,bool] = {}
         self.prompt_id: str = prompt_id
+        self.node_errors = []
+        self.execution_success = None
+        self.run_counts: Dict[str, int] = {}
 
     def get_output(self, node: Node):
         return self.outputs.get(node.id, None)
@@ -66,10 +96,12 @@ class ComfyClient:
         ws.connect("ws://{}/ws?clientId={}".format(self.server_address, self.client_id))
         self.ws = ws
 
-    def queue_prompt(self, prompt, partial_execution_targets=None):
+    def queue_prompt(self, prompt, partial_execution_targets=None, node_failure_policy=None):
         p = {"prompt": prompt, "client_id": self.client_id}
         if partial_execution_targets is not None:
             p["partial_execution_targets"] = partial_execution_targets
+        if node_failure_policy is not None:
+            p["node_failure_policy"] = node_failure_policy
         data = json.dumps(p).encode('utf-8')
         req =  urllib.request.Request("http://{}/prompt".format(self.server_address), data=data)
         return json.loads(urllib.request.urlopen(req).read())
@@ -133,13 +165,13 @@ class ComfyClient:
     def set_test_name(self, name):
         self.test_name = name
 
-    def run(self, graph, partial_execution_targets=None):
+    def run(self, graph, partial_execution_targets=None, node_failure_policy=None):
         prompt = graph.finalize()
         for node in graph.nodes.values():
             if node.class_type == 'SaveImage':
                 node.inputs['filename_prefix'] = self.test_name
 
-        prompt_id = self.queue_prompt(prompt, partial_execution_targets)['prompt_id']
+        prompt_id = self.queue_prompt(prompt, partial_execution_targets, node_failure_policy)['prompt_id']
         result = RunResult(prompt_id)
         while True:
             out = self.ws.recv()
@@ -152,8 +184,15 @@ class ComfyClient:
                     if data['node'] is None:
                         break
                     result.runs[data['node']] = True
+                    result.run_counts[data['node']] = result.run_counts.get(data['node'], 0) + 1
                 elif message['type'] == 'execution_error':
                     raise Exception(message['data'])
+                elif message['type'] == 'execution_node_error':
+                    if message['data']['prompt_id'] == prompt_id:
+                        result.node_errors.append(message['data'])
+                elif message['type'] == 'execution_success':
+                    if message['data']['prompt_id'] == prompt_id:
+                        result.execution_success = message['data']
                 elif message['type'] == 'execution_cached':
                     if message['data']['prompt_id'] == prompt_id:
                         cached_nodes = message['data'].get('nodes', [])
@@ -304,6 +343,122 @@ class TestExecution:
             assert False, "Should have raised an error"
         except Exception as e:
             assert 'prompt_id' in e.args[0], f"Did not get back a proper error message: {e}"
+
+    def test_continue_independent_after_error(self, client: ComfyClient, builder: GraphBuilder):
+        g = builder
+        image = g.node("StubImage", content="BLACK", height=32, width=32, batch_size=1)
+        error_node = g.node("TestSyncError", value=image.out(0))
+        blocked_output = g.node("PreviewImage", images=error_node.out(0))
+        successful_output = g.node("SaveImage", images=image.out(0))
+
+        result = client.run(g, node_failure_policy="continue_independent")
+
+        assert result.did_run(error_node)
+        assert result.was_executed(successful_output)
+        assert len(result.get_images(successful_output)) == 1
+        assert len(result.node_errors) == 1
+        assert result.node_errors[0]['node_id'] == error_node.id
+        assert result.execution_success['completion_status'] == 'partial_success'
+        assert result.execution_success['has_errors'] is True
+        assert result.execution_success['execution_error_count'] == 1
+        assert blocked_output.id in result.execution_success['blocked_output_node_ids']
+        assert successful_output.id in result.execution_success['successful_output_node_ids']
+        history = client.get_history(result.prompt_id)[result.prompt_id]
+        assert '_node_failure_policy' not in history['prompt'][3]
+
+        retry = client.run(g, node_failure_policy="continue_independent")
+        assert retry.did_run(error_node), "Failed nodes must be retried on a new prompt"
+        assert len(retry.node_errors) == 1
+
+    def test_continue_independent_reuses_failed_node_for_late_lazy_link(self, client: ComfyClient, builder: GraphBuilder):
+        g = builder
+        image = g.node("StubImage", content="BLACK", height=32, width=32, batch_size=1)
+        error_node = g.node("TestSyncError", value=image.out(0))
+        g.node("PreviewImage", images=error_node.out(0))
+
+        mask = g.node("StubMask", value=0.0, height=32, width=32, batch_size=1)
+        unused_image = g.node("StubImage", content="WHITE", height=32, width=32, batch_size=1)
+        lazy_mix = g.node("TestLazyMixImages", image1=error_node.out(0), image2=unused_image.out(0), mask=mask.out(0))
+        g.node("PreviewImage", images=lazy_mix.out(0))
+        successful_output = g.node("SaveImage", images=image.out(0))
+
+        result = client.run(g, node_failure_policy="continue_independent")
+
+        assert result.run_counts[error_node.id] == 1
+        assert lazy_mix.id in result.execution_success['blocked_node_ids']
+        assert successful_output.id in result.execution_success['successful_output_node_ids']
+        assert result.execution_success['completion_status'] == 'partial_success'
+
+    def test_continue_independent_handles_mixed_dynamic_results(self, client: ComfyClient, builder: GraphBuilder):
+        g = builder
+        zero = g.node("StubInt", value=0)
+        one = g.node("StubInt", value=1)
+        values = g.node("TestMakeListNode", value1=zero.out(0), value2=one.out(0))
+        mixed = g.node("TestMixedExpansionFailure", value=values.out(0))
+        output = g.node("PreviewImage", images=mixed.out(0))
+
+        result = client.run(g, node_failure_policy="continue_independent")
+
+        assert len(result.node_errors) == 1
+        assert result.node_errors[0]['node_id'] == mixed.id
+        assert len(result.get_images(output)) == 1
+        assert output.id in result.execution_success['successful_output_node_ids']
+        assert output.id not in result.execution_success['blocked_output_node_ids']
+        assert result.execution_success['completion_status'] == 'partial_success'
+
+        retry = client.run(g, node_failure_policy="continue_independent")
+        assert retry.did_run(mixed), "Failure-tainted dynamic parents must not be reused from cache"
+        assert len(retry.node_errors) == 1
+
+    def test_continue_independent_keeps_oom_terminal(self, client: ComfyClient, builder: GraphBuilder):
+        g = builder
+        image = g.node("StubImage", content="BLACK", height=32, width=32, batch_size=1)
+        oom_node = g.node("TestOOMError", value=image.out(0))
+        g.node("PreviewImage", images=oom_node.out(0))
+        g.node("SaveImage", images=image.out(0))
+
+        with pytest.raises(Exception) as exc_info:
+            client.run(g, node_failure_policy="continue_independent")
+
+        assert exc_info.value.args[0]['node_id'] == oom_node.id
+        assert exc_info.value.args[0]['exception_type'] == 'torch.OutOfMemoryError'
+
+    def test_continue_independent_accepts_cached_output(self, client: ComfyClient, builder: GraphBuilder, server):
+        g = builder
+        image = g.node("StubImage", content="BLACK", height=32, width=32, batch_size=1)
+        error_node = g.node("TestSyncError", value=image.out(0))
+        g.node("PreviewImage", images=error_node.out(0))
+        successful_output = g.node("SaveImage", images=image.out(0))
+
+        client.run(g, partial_execution_targets=[successful_output.id])
+        result = client.run(g, node_failure_policy="continue_independent")
+
+        if server["should_cache_results"]:
+            assert result.was_cached(successful_output)
+        assert len(result.node_errors) == 1
+        assert result.execution_success['completion_status'] == 'partial_success'
+        assert successful_output.id in result.execution_success['successful_output_node_ids']
+
+    def test_continue_independent_fails_when_no_output_survives(self, client: ComfyClient, builder: GraphBuilder):
+        g = builder
+        image = g.node("StubImage", content="BLACK", height=32, width=32, batch_size=1)
+        error_node = g.node("TestSyncError", value=image.out(0))
+        g.node("PreviewImage", images=error_node.out(0))
+
+        with pytest.raises(Exception) as exc_info:
+            client.run(g, node_failure_policy="continue_independent")
+
+        assert exc_info.value.args[0]['node_id'] == error_node.id
+
+    def test_invalid_node_failure_policy(self, client: ComfyClient, builder: GraphBuilder):
+        g = builder
+        image = g.node("StubImage", content="BLACK", height=32, width=32, batch_size=1)
+        g.node("PreviewImage", images=image.out(0))
+
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            client.queue_prompt(g.finalize(), node_failure_policy="continue_everything")
+
+        assert exc_info.value.code == 400
 
     @pytest.mark.parametrize("test_value, expect_error", [
         (5, True),

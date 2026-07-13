@@ -3,11 +3,12 @@ from typing import Type, Literal
 import nodes
 import asyncio
 import inspect
-from comfy_execution.graph_utils import is_link, ExecutionBlocker
+from comfy_execution.graph_utils import is_link, ExecutionBlocker, ExecutionFailureBlocker
 from comfy.comfy_types.node_typing import ComfyNodeABC, InputTypeDict, InputTypeOptions
 
 # NOTE: ExecutionBlocker code got moved to graph_utils.py to prevent torch being imported too soon during unit tests
 ExecutionBlocker = ExecutionBlocker
+ExecutionFailureBlocker = ExecutionFailureBlocker
 
 class DependencyCycleError(Exception):
     pass
@@ -201,19 +202,27 @@ class ExecutionList(TopologicalSort):
         self.staged_node_id = None
         self.execution_cache = {}
         self.execution_cache_listeners = {}
+        self.transient_cache = {}
 
     def is_cached(self, node_id):
-        return self.output_cache.get_local(node_id) is not None
+        return node_id in self.transient_cache or self.output_cache.get_local(node_id) is not None
+
+    def _get_cache_value(self, node_id):
+        if node_id in self.transient_cache:
+            return self.transient_cache[node_id]
+        return self.output_cache.get_local(node_id)
 
     def cache_link(self, from_node_id, to_node_id):
         if to_node_id not in self.execution_cache:
             self.execution_cache[to_node_id] = {}
-        self.execution_cache[to_node_id][from_node_id] = self.output_cache.get_local(from_node_id)
+        self.execution_cache[to_node_id][from_node_id] = self._get_cache_value(from_node_id)
         if from_node_id not in self.execution_cache_listeners:
             self.execution_cache_listeners[from_node_id] = set()
         self.execution_cache_listeners[from_node_id].add(to_node_id)
 
     def get_cache(self, from_node_id, to_node_id):
+        if from_node_id in self.transient_cache:
+            return self.transient_cache[from_node_id]
         if to_node_id not in self.execution_cache:
             return None
         value = self.execution_cache[to_node_id].get(from_node_id)
@@ -223,7 +232,9 @@ class ExecutionList(TopologicalSort):
         self.output_cache.set_local(from_node_id, value)
         return value
 
-    def cache_update(self, node_id, value):
+    def cache_update(self, node_id, value, transient=False):
+        if transient:
+            self.transient_cache[node_id] = value
         if node_id in self.execution_cache_listeners:
             for to_node_id in self.execution_cache_listeners[node_id]:
                 if to_node_id in self.execution_cache:

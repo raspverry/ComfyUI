@@ -32,9 +32,13 @@ from comfy_execution.caching import (
     RAM_CACHE_LARGE_INTERMEDIATE,
 )
 from comfy_execution.graph import (
+    DependencyCycleError,
     DynamicPrompt,
     ExecutionBlocker,
+    ExecutionFailureBlocker,
     ExecutionList,
+    NodeInputError,
+    NodeNotFoundError,
     get_input_info,
 )
 from comfy_execution.graph_utils import GraphBuilder, is_link
@@ -51,6 +55,16 @@ class ExecutionResult(Enum):
     SUCCESS = 0
     FAILURE = 1
     PENDING = 2
+    BLOCKED = 3
+
+
+NODE_FAILURE_POLICY_FAIL_FAST = "fail_fast"
+NODE_FAILURE_POLICY_CONTINUE_INDEPENDENT = "continue_independent"
+NODE_FAILURE_POLICIES = frozenset({
+    NODE_FAILURE_POLICY_FAIL_FAST,
+    NODE_FAILURE_POLICY_CONTINUE_INDEPENDENT,
+})
+NODE_FAILURE_POLICY_EXTRA_DATA_KEY = "_node_failure_policy"
 
 class DuplicateNodeError(Exception):
     pass
@@ -104,6 +118,38 @@ class CacheEntry(NamedTuple):
     outputs: list
 
 
+def _failure_blocker_state(value):
+    if isinstance(value, ExecutionFailureBlocker):
+        return True, False
+    if isinstance(value, dict):
+        values = value.values()
+    elif isinstance(value, (list, tuple)):
+        values = value
+    else:
+        return False, True
+
+    has_failure_blocker = False
+    has_normal_value = False
+    for child in values:
+        child_failure, child_normal = _failure_blocker_state(child)
+        has_failure_blocker = has_failure_blocker or child_failure
+        has_normal_value = has_normal_value or child_normal
+        if has_failure_blocker and has_normal_value:
+            break
+    return has_failure_blocker, has_normal_value
+
+
+def _is_recoverable_node_failure(ex):
+    if isinstance(ex, (
+        comfy.model_management.InterruptProcessingException,
+        DependencyCycleError,
+        NodeInputError,
+        NodeNotFoundError,
+    )):
+        return False
+    return not comfy.model_management.is_oom(ex)
+
+
 class CacheType(Enum):
     CLASSIC = 0
     LRU = 1
@@ -152,7 +198,7 @@ class CacheSet:
         }
         return result
 
-SENSITIVE_EXTRA_DATA_KEYS = ("auth_token_comfy_org", "api_key_comfy_org")
+SENSITIVE_EXTRA_DATA_KEYS = ("auth_token_comfy_org", "api_key_comfy_org", NODE_FAILURE_POLICY_EXTRA_DATA_KEY)
 
 def get_input_data(inputs, class_def, unique_id, execution_list=None, dynprompt=None, extra_data={}):
     is_v3 = issubclass(class_def, _ComfyNodeInternal)
@@ -449,6 +495,8 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
         return (ExecutionResult.SUCCESS, None, None)
 
     input_data_all = None
+    failure_blocked_invocations = 0
+    successful_invocations = 0
     try:
         if unique_id in pending_async_nodes:
             results = []
@@ -518,6 +566,9 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
                     return (ExecutionResult.PENDING, None, None)
 
             def execution_block_cb(block):
+                nonlocal failure_blocked_invocations
+                if isinstance(block, ExecutionFailureBlocker):
+                    failure_blocked_invocations += 1
                 if block.message is not None:
                     mes = {
                         "prompt_id": prompt_id,
@@ -536,6 +587,8 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
                 else:
                     return block
             def pre_execute_cb(call_index):
+                nonlocal successful_invocations
+                successful_invocations += 1
                 # TODO - How to handle this with async functions without contextvars (which requires Python 3.12)?
                 GraphBuilder.set_default_prefix(unique_id, call_index, 0)
 
@@ -611,8 +664,14 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
             return (ExecutionResult.PENDING, None, None)
 
         cache_entry = CacheEntry(ui=ui_outputs.get(unique_id), outputs=output_data)
-        execution_list.cache_update(unique_id, cache_entry)
-        await caches.outputs.set(unique_id, cache_entry)
+        if extra_data.get(NODE_FAILURE_POLICY_EXTRA_DATA_KEY) == NODE_FAILURE_POLICY_CONTINUE_INDEPENDENT:
+            has_failure_blocker, has_normal_output = _failure_blocker_state(output_data)
+        else:
+            has_failure_blocker, has_normal_output = False, True
+        failure_tainted = has_failure_blocker or failure_blocked_invocations > 0
+        execution_list.cache_update(unique_id, cache_entry, transient=failure_tainted)
+        if not failure_tainted:
+            await caches.outputs.set(unique_id, cache_entry)
 
     except comfy.model_management.InterruptProcessingException as iex:
         logging.info("Processing interrupted")
@@ -654,6 +713,12 @@ async def execute(server, dynprompt, caches, current_item, extra_data, executed,
 
         return (ExecutionResult.FAILURE, error_details, ex)
 
+    fully_failure_blocked = failure_blocked_invocations > 0 and successful_invocations == 0
+    fully_failure_blocked = fully_failure_blocked or (has_failure_blocker and not has_normal_output)
+    if fully_failure_blocked:
+        get_progress_state().block_progress(unique_id)
+        return (ExecutionResult.BLOCKED, None, None)
+
     get_progress_state().finish_progress(unique_id)
     executed.add(unique_id)
 
@@ -670,6 +735,7 @@ class PromptExecutor:
         self.caches = CacheSet(cache_type=self.cache_type, cache_args=self.cache_args)
         self.status_messages = []
         self.success = True
+        self.execution_summary = {}
 
     def add_message(self, event, data: dict, broadcast: bool):
         data = {
@@ -708,6 +774,21 @@ class PromptExecutor:
             }
             self.add_message("execution_error", mes, broadcast=False)
 
+    def handle_node_execution_error(self, prompt_id, prompt, current_outputs, executed, error):
+        node_id = error["node_id"]
+        mes = {
+            "prompt_id": prompt_id,
+            "node_id": node_id,
+            "node_type": prompt[node_id]["class_type"],
+            "executed": list(executed),
+            "exception_message": error["exception_message"],
+            "exception_type": error["exception_type"],
+            "traceback": error["traceback"],
+            "current_inputs": error["current_inputs"],
+            "current_outputs": list(current_outputs),
+        }
+        self.add_message("execution_node_error", mes, broadcast=False)
+
     def _notify_prompt_lifecycle(self, event: str, prompt_id: str):
         if not _has_cache_providers():
             return
@@ -728,6 +809,8 @@ class PromptExecutor:
         set_preview_method(extra_data.get("preview_method"))
 
         nodes.interrupt_processing(False)
+        self.success = True
+        self.execution_summary = {}
 
         if "client_id" in extra_data:
             self.server.client_id = extra_data["client_id"]
@@ -772,24 +855,59 @@ class PromptExecutor:
                 executed = set()
                 execution_list = ExecutionList(dynamic_prompt, self.caches.outputs)
                 current_outputs = self.caches.outputs.all_node_ids()
+                output_targets = set(execute_outputs)
+                failed_node_ids = set()
+                blocked_node_ids = set()
+                blocked_output_node_ids = set()
+                successful_output_node_ids = set()
+                node_failures = []
+                continue_independent = extra_data.get(
+                    NODE_FAILURE_POLICY_EXTRA_DATA_KEY,
+                    NODE_FAILURE_POLICY_FAIL_FAST,
+                ) == NODE_FAILURE_POLICY_CONTINUE_INDEPENDENT
                 for node_id in list(execute_outputs):
                     execution_list.add_node(node_id)
 
                 while not execution_list.is_empty():
                     node_id, error, ex = await execution_list.stage_node_execution()
                     if error is not None:
+                        self.success = False
                         self.handle_execution_error(prompt_id, dynamic_prompt.original_prompt, current_outputs, executed, error, ex)
                         break
 
                     assert node_id is not None, "Node ID should not be None at this point"
                     result, error, ex = await execute(self.server, dynamic_prompt, self.caches, node_id, extra_data, executed, prompt_id, execution_list, pending_subgraph_results, pending_async_nodes, ui_node_outputs)
-                    self.success = result != ExecutionResult.FAILURE
                     if result == ExecutionResult.FAILURE:
-                        self.handle_execution_error(prompt_id, dynamic_prompt.original_prompt, current_outputs, executed, error, ex)
-                        break
+                        if continue_independent and _is_recoverable_node_failure(ex):
+                            self.handle_node_execution_error(prompt_id, dynamic_prompt.original_prompt, current_outputs, executed, error)
+                            real_node_id = error["node_id"]
+                            failed_node_ids.add(real_node_id)
+                            node_failures.append((error, ex))
+                            blocker = ExecutionFailureBlocker(real_node_id)
+                            class_type = dynamic_prompt.get_node(node_id)["class_type"]
+                            class_def = nodes.NODE_CLASS_MAPPINGS[class_type]
+                            cache_entry = CacheEntry(
+                                ui=None,
+                                outputs=[[blocker] for _ in class_def.RETURN_TYPES],
+                            )
+                            execution_list.cache_update(node_id, cache_entry, transient=True)
+                            get_progress_state().error_progress(node_id)
+                            execution_list.complete_node_execution()
+                        else:
+                            self.success = False
+                            self.handle_execution_error(prompt_id, dynamic_prompt.original_prompt, current_outputs, executed, error, ex)
+                            break
                     elif result == ExecutionResult.PENDING:
                         execution_list.unstage_node_execution()
+                    elif result == ExecutionResult.BLOCKED:
+                        real_node_id = dynamic_prompt.get_real_node_id(node_id)
+                        blocked_node_ids.add(real_node_id)
+                        if node_id in output_targets:
+                            blocked_output_node_ids.add(real_node_id)
+                        execution_list.complete_node_execution()
                     else: # result == ExecutionResult.SUCCESS:
+                        if node_id in output_targets:
+                            successful_output_node_ids.add(dynamic_prompt.get_real_node_id(node_id))
                         execution_list.complete_node_execution()
 
                     if self.cache_type == CacheType.RAM_PRESSURE:
@@ -817,7 +935,41 @@ class PromptExecutor:
                         if cached is not None:
                             display_node_id = dynamic_prompt.get_display_node_id(node_id)
                             _send_cached_ui(self.server, node_id, display_node_id, cached, prompt_id, ui_node_outputs)
-                    self.add_message("execution_success", { "prompt_id": prompt_id }, broadcast=False)
+
+                    if node_failures:
+                        self.execution_summary = {
+                            "has_errors": True,
+                            "execution_error_count": len(node_failures),
+                            "failed_node_ids": sorted(failed_node_ids)[:100],
+                            "blocked_node_ids": sorted(blocked_node_ids)[:100],
+                            "blocked_output_node_ids": sorted(blocked_output_node_ids)[:100],
+                            "successful_output_node_ids": sorted(successful_output_node_ids)[:100],
+                        }
+                        if successful_output_node_ids:
+                            self.execution_summary["completion_status"] = "partial_success"
+                            self.add_message(
+                                "execution_success",
+                                {"prompt_id": prompt_id, **self.execution_summary},
+                                broadcast=False,
+                            )
+                        else:
+                            self.success = False
+                            last_error, last_ex = node_failures[-1]
+                            self.handle_execution_error(
+                                prompt_id,
+                                dynamic_prompt.original_prompt,
+                                current_outputs,
+                                executed,
+                                last_error,
+                                last_ex,
+                            )
+                    else:
+                        self.execution_summary = {
+                            "completion_status": "success",
+                            "has_errors": False,
+                            "execution_error_count": 0,
+                        }
+                        self.add_message("execution_success", { "prompt_id": prompt_id }, broadcast=False)
 
                 ui_outputs = {}
                 meta_outputs = {}
@@ -1275,6 +1427,7 @@ class PromptQueue:
         status_str: Literal['success', 'error']
         completed: bool
         messages: List[str]
+        execution_summary: Optional[dict] = None
 
     def task_done(self, item_id, history_result,
                   status: Optional['PromptQueue.ExecutionStatus'], process_item=None):

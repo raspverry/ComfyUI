@@ -464,15 +464,16 @@ def test_startup_script_runs_the_local_comfy_entrypoint():
     assert "custom_nodes/ComfyUI-LTXVideo-mlx" in text
 
 
-def test_operator_guide_records_local_runtime_requirements():
+def test_operator_guide_records_runtime_requirements():
     guide = (ROOT / "docs/ltx-mlx-stack.md").read_text()
 
     for requirement in (
         "64 GB",
         "reference-front.png",
         "reference-profile.png",
-        "local-only",
-        "f0e6f3b",
+        "https://github.com/raspverry/ComfyUI-LTXVideo-mlx",
+        "f0e6f3b05661e8a7e515e6f11bd74c8ed4fb688b",
         "HF_HUB_OFFLINE=1",
     ):
         assert requirement in guide
+    assert "local-only" not in guide

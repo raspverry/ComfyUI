@@ -11,7 +11,12 @@ Import either JSON file from the ComfyUI workflow menu. The recurring-character 
 
 Before queueing the recurring-character workflow, upload two identity references and select them in the LoadImage nodes named `reference-front.png` and `reference-profile.png`. These are placeholders, so the workflow cannot run while either image is missing.
 
-This checkout is `local-only` until its custom-node changes through commit `f0e6f3b` are published. Stock `dgrauet/ComfyUI-LTXVideo-mlx` lacks the Ingredients node and the in-process I2V fix, so another machine is not reproducible until a fork revision containing those changes is published and pinned.
+The maintained custom node is [raspverry/ComfyUI-LTXVideo-mlx](https://github.com/raspverry/ComfyUI-LTXVideo-mlx), pinned here to commit `f0e6f3b05661e8a7e515e6f11bd74c8ed4fb688b`. Stock `dgrauet/ComfyUI-LTXVideo-mlx` does not contain the Ingredients node or the in-process I2V fix used by these workflows.
+
+```bash
+git clone https://github.com/raspverry/ComfyUI-LTXVideo-mlx.git custom_nodes/ComfyUI-LTXVideo-mlx
+git -C custom_nodes/ComfyUI-LTXVideo-mlx checkout f0e6f3b05661e8a7e515e6f11bd74c8ed4fb688b
+```
 
 ## Install check and startup
 

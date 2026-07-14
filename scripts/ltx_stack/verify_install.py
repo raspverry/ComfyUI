@@ -1,23 +1,16 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import os
 from pathlib import Path
+
+from huggingface_hub.constants import HF_HUB_CACHE
 
 
 MANIFEST_PATH = Path(__file__).with_name("model_manifest.json")
 
 
-def huggingface_cache():
-    if cache := os.environ.get("HF_HUB_CACHE"):
-        return Path(cache).expanduser()
-    if home := os.environ.get("HF_HOME"):
-        return Path(home).expanduser() / "hub"
-    return Path.home() / ".cache/huggingface/hub"
-
-
 def find_snapshot(repo_id, filenames):
-    repo_dir = huggingface_cache() / f"models--{repo_id.replace('/', '--')}" / "snapshots"
+    repo_dir = Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}" / "snapshots"
     if not repo_dir.is_dir():
         return None
     for snapshot in repo_dir.iterdir():

@@ -4,14 +4,49 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).parents[2]
 MANIFEST_PATH = ROOT / "scripts/ltx_stack/model_manifest.json"
 VERIFY_SCRIPT = ROOT / "scripts/ltx_stack/verify_install.py"
+CACHE_ENV_VARS = {"HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_HOME", "XDG_CACHE_HOME"}
 
 
 def load_manifest():
     return json.loads(MANIFEST_PATH.read_text())
+
+
+def create_valid_install(root, hf_cache):
+    manifest = load_manifest()
+    for model in manifest.values():
+        if model["required"]:
+            for file in model["files"]:
+                destination = root / file["destination"]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.touch()
+        for destination in model.get("shared_dependencies", []):
+            shared = root / destination
+            shared.parent.mkdir(parents=True, exist_ok=True)
+            shared.touch()
+
+    custom_node = root / "custom_nodes/ComfyUI-LTXVideo-mlx"
+    custom_node.mkdir(parents=True)
+    (custom_node / "__init__.py").touch()
+
+    text_encoder = manifest["ltx_2_3_q8"]["text_encoder"]
+    repo_dir = f"models--{text_encoder['repo_id'].replace('/', '--')}"
+    snapshot = hf_cache / repo_dir / "snapshots/test"
+    snapshot.mkdir(parents=True)
+    for filename in text_encoder["files"]:
+        (snapshot / filename).touch()
+
+
+def clean_cache_env(tmp_path, **overrides):
+    env = {key: value for key, value in os.environ.items() if key not in CACHE_ENV_VARS}
+    env["HOME"] = str(tmp_path / "home")
+    env.update({key: str(value) for key, value in overrides.items()})
+    return env
 
 
 def test_model_manifest_uses_only_selected_model_families():
@@ -107,33 +142,12 @@ def test_ltx_q8_uses_only_the_curated_local_runtime_files():
 
 
 def test_verifier_allows_missing_gated_ingredients(tmp_path):
-    manifest = load_manifest()
-    for model in manifest.values():
-        if model["required"] and model.get("destination") != "huggingface_cache":
-            for file in model["files"]:
-                destination = tmp_path / file["destination"]
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.touch()
-        for destination in model.get("shared_dependencies", []):
-            shared = tmp_path / destination
-            shared.parent.mkdir(parents=True, exist_ok=True)
-            shared.touch()
-
-    custom_node = tmp_path / "custom_nodes/ComfyUI-LTXVideo-mlx"
-    custom_node.mkdir(parents=True)
-    (custom_node / "__init__.py").touch()
-
     hf_cache = tmp_path / "hf-cache"
-    text_encoder = manifest["ltx_2_3_q8"]["text_encoder"]
-    repo_dir = f"models--{text_encoder['repo_id'].replace('/', '--')}"
-    snapshot = hf_cache / repo_dir / "snapshots/test"
-    snapshot.mkdir(parents=True)
-    for filename in text_encoder["files"]:
-        (snapshot / filename).touch()
+    create_valid_install(tmp_path, hf_cache)
 
     result = subprocess.run(
         [sys.executable, str(VERIFY_SCRIPT), "--root", str(tmp_path)],
-        env={**os.environ, "HF_HUB_CACHE": str(hf_cache)},
+        env=clean_cache_env(tmp_path, HF_HUB_CACHE=hf_cache),
         capture_output=True,
         text=True,
     )
@@ -141,6 +155,35 @@ def test_verifier_allows_missing_gated_ingredients(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[OPTIONAL] ingredients" in result.stdout
     assert "authentication" in result.stdout
+
+
+@pytest.mark.parametrize("cache_source", ["xdg", "legacy", "hf_over_legacy"])
+def test_verifier_uses_huggingface_hub_cache_precedence(tmp_path, cache_source):
+    if cache_source == "xdg":
+        xdg_cache = tmp_path / "xdg"
+        hf_cache = xdg_cache / "huggingface/hub"
+        env = clean_cache_env(tmp_path, XDG_CACHE_HOME=xdg_cache)
+    elif cache_source == "legacy":
+        hf_cache = tmp_path / "legacy-cache"
+        env = clean_cache_env(tmp_path, HUGGINGFACE_HUB_CACHE=hf_cache)
+    else:
+        hf_cache = tmp_path / "current-cache"
+        env = clean_cache_env(
+            tmp_path,
+            HUGGINGFACE_HUB_CACHE=tmp_path / "empty-legacy-cache",
+            HF_HUB_CACHE=hf_cache,
+        )
+    create_valid_install(tmp_path, hf_cache)
+
+    result = subprocess.run(
+        [sys.executable, str(VERIFY_SCRIPT), "--root", str(tmp_path)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[OK] ltx_2_3_q8.text_encoder" in result.stdout
 
 
 def test_verifier_fails_when_a_required_public_file_is_missing(tmp_path):

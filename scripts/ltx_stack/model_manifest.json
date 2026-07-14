@@ -7,15 +7,18 @@
     "files": [
       {
         "filename": "split_files/diffusion_models/z_image_turbo_bf16.safetensors",
-        "destination": "models/diffusion_models/z_image_turbo_bf16.safetensors"
+        "destination": "models/diffusion_models/z_image_turbo_bf16.safetensors",
+        "size": 12309866400
       },
       {
         "filename": "split_files/text_encoders/qwen_3_4b.safetensors",
-        "destination": "models/text_encoders/qwen_3_4b.safetensors"
+        "destination": "models/text_encoders/qwen_3_4b.safetensors",
+        "size": 8044982048
       },
       {
         "filename": "split_files/vae/ae.safetensors",
-        "destination": "models/vae/ae.safetensors"
+        "destination": "models/vae/ae.safetensors",
+        "size": 335304388
       }
     ]
   },
@@ -27,12 +30,14 @@
     "files": [
       {
         "filename": "flux-2-klein-4b.safetensors",
-        "destination": "models/diffusion_models/flux-2-klein-4b.safetensors"
+        "destination": "models/diffusion_models/flux-2-klein-4b.safetensors",
+        "size": 7751105712
       },
       {
         "filename": "split_files/vae/flux2-vae.safetensors",
         "destination": "models/vae/flux2-vae.safetensors",
-        "repo_id": "Comfy-Org/flux2-dev"
+        "repo_id": "Comfy-Org/flux2-dev",
+        "size": 336213556
       }
     ],
     "shared_dependencies": [
@@ -48,59 +53,68 @@
     "files": [
       {
         "filename": "config.json",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/config.json"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/config.json",
+        "size": 951
       },
       {
         "filename": "embedded_config.json",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/embedded_config.json"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/embedded_config.json",
+        "size": 7234
       },
       {
         "filename": "quantize_config.json",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/quantize_config.json"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/quantize_config.json",
+        "size": 100
       },
       {
         "filename": "split_model.json",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/split_model.json"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/split_model.json",
+        "size": 626
       },
       {
         "filename": "connector.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/connector.safetensors"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/connector.safetensors",
+        "size": 6344495512
       },
       {
         "filename": "transformer-dev.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/transformer-dev.safetensors"
-      },
-      {
-        "filename": "transformer-distilled-1.1.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/transformer-distilled-1.1.safetensors"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/transformer-dev.safetensors",
+        "size": 20597189549
       },
       {
         "filename": "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+        "size": 7605507256
       },
       {
         "filename": "spatial_upscaler_x2_v1_1.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/spatial_upscaler_x2_v1_1.safetensors"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/spatial_upscaler_x2_v1_1.safetensors",
+        "size": 995745061
       },
       {
         "filename": "spatial_upscaler_x2_v1_1_config.json",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/spatial_upscaler_x2_v1_1_config.json"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/spatial_upscaler_x2_v1_1_config.json",
+        "size": 275
       },
       {
         "filename": "vae_encoder.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/vae_encoder.safetensors"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/vae_encoder.safetensors",
+        "size": 637885319
       },
       {
         "filename": "vae_decoder.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/vae_decoder.safetensors"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/vae_decoder.safetensors",
+        "size": 814349531
       },
       {
         "filename": "audio_vae.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/audio_vae.safetensors"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/audio_vae.safetensors",
+        "size": 106509048
       },
       {
         "filename": "vocoder.safetensors",
-        "destination": "models/ltx/ltx-2.3-mlx-q8/vocoder.safetensors"
+        "destination": "models/ltx/ltx-2.3-mlx-q8/vocoder.safetensors",
+        "size": 258313851
       }
     ],
     "text_encoder": {
@@ -109,20 +123,60 @@
       "required": true,
       "gated": false,
       "license_url": "https://ai.google.dev/gemma/terms",
+      "revision": "86cc6a8dedbc456dd0e4af01a9d09f396f77e558",
       "files": [
-        "added_tokens.json",
-        "chat_template.json",
-        "config.json",
-        "generation_config.json",
-        "model-00001-of-00002.safetensors",
-        "model-00002-of-00002.safetensors",
-        "model.safetensors.index.json",
-        "preprocessor_config.json",
-        "processor_config.json",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer.model",
-        "tokenizer_config.json"
+        {
+          "filename": "added_tokens.json",
+          "size": 35
+        },
+        {
+          "filename": "chat_template.json",
+          "size": 1615
+        },
+        {
+          "filename": "config.json",
+          "size": 1141
+        },
+        {
+          "filename": "generation_config.json",
+          "size": 192
+        },
+        {
+          "filename": "model-00001-of-00002.safetensors",
+          "size": 5367455313
+        },
+        {
+          "filename": "model-00002-of-00002.safetensors",
+          "size": 2661219935
+        },
+        {
+          "filename": "model.safetensors.index.json",
+          "size": 108605
+        },
+        {
+          "filename": "preprocessor_config.json",
+          "size": 570
+        },
+        {
+          "filename": "processor_config.json",
+          "size": 70
+        },
+        {
+          "filename": "special_tokens_map.json",
+          "size": 662
+        },
+        {
+          "filename": "tokenizer.json",
+          "size": 33384568
+        },
+        {
+          "filename": "tokenizer.model",
+          "size": 4689074
+        },
+        {
+          "filename": "tokenizer_config.json",
+          "size": 1157007
+        }
       ]
     }
   },

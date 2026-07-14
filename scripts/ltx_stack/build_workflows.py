@@ -160,7 +160,7 @@ def _quick_workflow(template_dir):
             3,
             inputs=(("text_encoder", "LTXV_MLX_TEXT_ENCODER"),),
             outputs=(("conditioning", "LTXV_MLX_CONDITIONING"),),
-            widgets=(QUICK_VIDEO_PROMPT, NEGATIVE_PROMPT, 1024),
+            widgets=(QUICK_VIDEO_PROMPT, NEGATIVE_PROMPT, 256),
         ),
         _node(
             6,
@@ -338,7 +338,7 @@ def _recurring_workflow(template_dir):
             6,
             inputs=(("text_encoder", "LTXV_MLX_TEXT_ENCODER"),),
             outputs=(("conditioning", "LTXV_MLX_CONDITIONING"),),
-            widgets=(RECURRING_VIDEO_PROMPT, NEGATIVE_PROMPT, 1024),
+            widgets=(RECURRING_VIDEO_PROMPT, "", 256),
         ),
         _node(
             9,
@@ -399,7 +399,7 @@ def build_workflows(template_dir, output_dir):
         "recurring-character.json": _recurring_workflow(template_dir),
     }
     for name, workflow in workflows.items():
-        (output_dir / name).write_text(json.dumps(workflow, indent=2) + "\n")
+        (output_dir / name).write_bytes((json.dumps(workflow, indent=2) + "\n").encode())
 
 
 def main():

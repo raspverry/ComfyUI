@@ -246,6 +246,28 @@ def _recurring_workflow(template_dir):
             "directory": "diffusion_models",
         }
     ]
+    scheduler = _find_node(flux_definition, "Flux2Scheduler")
+    latent = _find_node(flux_definition, "EmptyFlux2LatentImage")
+    scheduler["widgets_values"] = [4, 768, 448]
+    latent["widgets_values"] = [768, 448, 1]
+
+    image_size = _find_node(flux_definition, "GetImageSize")
+    size_links = {image_size["inputs"][0]["link"]}
+    for output in image_size["outputs"]:
+        size_links.update(output.get("links") or [])
+    flux_definition["nodes"].remove(image_size)
+    flux_definition["links"] = [
+        link for link in flux_definition["links"] if link["id"] not in size_links
+    ]
+    for item in flux_definition["nodes"]:
+        for input_slot in item.get("inputs", []):
+            if input_slot.get("link") in size_links:
+                input_slot["link"] = None
+        for output_slot in item.get("outputs", []):
+            if output_slot.get("links"):
+                output_slot["links"] = [
+                    link_id for link_id in output_slot["links"] if link_id not in size_links
+                ]
     _find_node(flux_definition, "CLIPTextEncode")["widgets_values"][0] = SHEET_PROMPT
 
     first_image = deepcopy(next(item for item in source["nodes"] if item["id"] == 76))

@@ -85,6 +85,12 @@ def test_recurring_character_builds_bf16_reference_sheet_and_ingredients_video()
     flux = subgraph(workflow, FLUX_EDIT_SUBGRAPH)
     assert flux["name"].startswith("Image Edit (Flux.2 Klein")
     assert node(flux, "UNETLoader")["widgets_values"][0] == "flux-2-klein-4b.safetensors"
+    scheduler = node(flux, "Flux2Scheduler")
+    latent = node(flux, "EmptyFlux2LatentImage")
+    assert scheduler["widgets_values"] == [4, 768, 448]
+    assert latent["widgets_values"] == [768, 448, 1]
+    assert all(item["link"] is None for item in scheduler["inputs"] + latent["inputs"])
+    assert not any(item["type"] == "GetImageSize" for item in flux["nodes"])
     sheet_prompt = node(flux, "CLIPTextEncode")["widgets_values"][0].lower()
     assert "30-year-old adult woman" in sheet_prompt
     assert all(term in sheet_prompt for term in ("black background", "no text", "clean"))

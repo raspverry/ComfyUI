@@ -836,7 +836,7 @@
                 "widget": {
                   "name": "width"
                 },
-                "link": 171
+                "link": null
               },
               {
                 "localized_name": "height",
@@ -845,7 +845,7 @@
                 "widget": {
                   "name": "height"
                 },
-                "link": 173
+                "link": null
               }
             ],
             "outputs": [
@@ -877,8 +877,8 @@
             },
             "widgets_values": [
               4,
-              1024,
-              1024
+              768,
+              448
             ]
           },
           {
@@ -1421,8 +1421,7 @@
                 "name": "IMAGE",
                 "type": "IMAGE",
                 "links": [
-                  169,
-                  170
+                  169
                 ]
               }
             ],
@@ -1729,7 +1728,7 @@
                 "widget": {
                   "name": "width"
                 },
-                "link": 172
+                "link": null
               },
               {
                 "localized_name": "height",
@@ -1738,7 +1737,7 @@
                 "widget": {
                   "name": "height"
                 },
-                "link": 174
+                "link": null
               }
             ],
             "outputs": [
@@ -1769,79 +1768,10 @@
               }
             },
             "widgets_values": [
-              1024,
-              1024,
+              768,
+              448,
               1
             ]
-          },
-          {
-            "id": 114,
-            "type": "GetImageSize",
-            "pos": [
-              -420,
-              1140
-            ],
-            "size": [
-              230,
-              120
-            ],
-            "flags": {
-              "collapsed": true
-            },
-            "order": 16,
-            "mode": 0,
-            "inputs": [
-              {
-                "localized_name": "image",
-                "name": "image",
-                "type": "IMAGE",
-                "link": 170
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "width",
-                "name": "width",
-                "type": "INT",
-                "links": [
-                  171,
-                  172
-                ]
-              },
-              {
-                "localized_name": "height",
-                "name": "height",
-                "type": "INT",
-                "links": [
-                  173,
-                  174
-                ]
-              },
-              {
-                "localized_name": "batch_size",
-                "name": "batch_size",
-                "type": "INT",
-                "links": null
-              }
-            ],
-            "properties": {
-              "cnr_id": "comfy-core",
-              "ver": "0.8.2",
-              "Node name for S&R": "GetImageSize",
-              "enableTabs": false,
-              "tabWidth": 65,
-              "tabXOffset": 10,
-              "hasSecondTab": false,
-              "secondTabText": "Send Back",
-              "secondTabOffset": 80,
-              "secondTabWidth": 65,
-              "ue_properties": {
-                "widget_ue_connectable": {},
-                "version": "7.7",
-                "input_ue_unconnectable": {}
-              }
-            },
-            "widgets_values": []
           }
         ],
         "groups": [
@@ -2013,46 +1943,6 @@
             "target_id": 112,
             "target_slot": 2,
             "type": "IMAGE"
-          },
-          {
-            "id": 170,
-            "origin_id": 111,
-            "origin_slot": 0,
-            "target_id": 114,
-            "target_slot": 0,
-            "type": "IMAGE"
-          },
-          {
-            "id": 171,
-            "origin_id": 114,
-            "origin_slot": 0,
-            "target_id": 102,
-            "target_slot": 0,
-            "type": "INT"
-          },
-          {
-            "id": 172,
-            "origin_id": 114,
-            "origin_slot": 0,
-            "target_id": 113,
-            "target_slot": 0,
-            "type": "INT"
-          },
-          {
-            "id": 173,
-            "origin_id": 114,
-            "origin_slot": 1,
-            "target_id": 102,
-            "target_slot": 1,
-            "type": "INT"
-          },
-          {
-            "id": 174,
-            "origin_id": 114,
-            "origin_slot": 1,
-            "target_id": 113,
-            "target_slot": 1,
-            "type": "INT"
           },
           {
             "id": 175,

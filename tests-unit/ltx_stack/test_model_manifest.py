@@ -459,5 +459,20 @@ def test_startup_script_runs_the_local_comfy_entrypoint():
     text = script.read_text()
 
     assert os.access(script, os.X_OK)
+    assert "export HF_HUB_OFFLINE=1" in text.splitlines()
     assert 'exec "$PYTHON" main.py --listen 127.0.0.1 --port 8188 --preview-method auto' in text
     assert "custom_nodes/ComfyUI-LTXVideo-mlx" in text
+
+
+def test_operator_guide_records_local_runtime_requirements():
+    guide = (ROOT / "docs/ltx-mlx-stack.md").read_text()
+
+    for requirement in (
+        "64 GB",
+        "reference-front.png",
+        "reference-profile.png",
+        "local-only",
+        "f0e6f3b",
+        "HF_HUB_OFFLINE=1",
+    ):
+        assert requirement in guide

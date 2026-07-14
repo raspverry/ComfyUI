@@ -1,6 +1,6 @@
 # LTX 2.3 MLX stack on macOS
 
-This stack keeps image generation in ComfyUI and runs LTX 2.3 video generation in-process with MLX. It standardizes on `dgrauet/ltx-2.3-mlx-q8`: q8 is the quality/memory profile used by both workflows, while q4 and other variants are intentionally outside this setup.
+This stack keeps image generation in ComfyUI and runs LTX 2.3 video generation in-process with MLX. It standardizes on `dgrauet/ltx-2.3-mlx-q8`: q8 is the quality/memory profile used by both workflows, while q4 and other variants are intentionally outside this setup. The workflows use the `standard` MLX profile and target Apple Silicon with at least 64 GB of unified memory. On 16 GB or 32 GB systems, change both MLX loader nodes to `low_vram` before queueing. The starter prompt padded sequence is 256 tokens.
 
 ## Workflows
 
@@ -8,6 +8,10 @@ This stack keeps image generation in ComfyUI and runs LTX 2.3 video generation i
 - `workflows/ltx-mlx/recurring-character.json` uses FLUX.2 Klein multi-reference editing to build a reference sheet, repeats it across the video timeline, and runs the LTX Ingredients sampler.
 
 Import either JSON file from the ComfyUI workflow menu. The recurring-character workflow remains unavailable until the gated Ingredients checkpoint is installed.
+
+Before queueing the recurring-character workflow, upload two identity references and select them in the LoadImage nodes named `reference-front.png` and `reference-profile.png`. These are placeholders, so the workflow cannot run while either image is missing.
+
+This checkout is `local-only` until its custom-node changes through commit `f0e6f3b` are published. Stock `dgrauet/ComfyUI-LTXVideo-mlx` lacks the Ingredients node and the in-process I2V fix, so another machine is not reproducible until a fork revision containing those changes is published and pinned.
 
 ## Install check and startup
 
@@ -20,7 +24,7 @@ Run the offline verifier before starting ComfyUI:
 ./scripts/start_ltx_stack_macos.sh
 ```
 
-The verifier fails for a missing public model, incomplete curated q8 directory, incomplete Gemma snapshot, or missing custom node. Missing Ingredients weights are reported as optional because Hugging Face authentication alone is insufficient until the repository terms have been accepted.
+The startup script exports `HF_HUB_OFFLINE=1`, so the verified pinned Gemma snapshot must already exist in the selected Hugging Face cache before launch. The verifier fails for a missing public model, incomplete curated q8 directory, incomplete Gemma snapshot, or missing custom node. Missing Ingredients weights are reported as optional because Hugging Face authentication alone is insufficient until the repository terms have been accepted; the recurring-character workflow still requires them.
 
 For Ingredients, accept access at [LTX-2.3 Ingredients](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients), authenticate with `hf auth login`, download `ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors`, and place it at `models/loras/ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors`.
 

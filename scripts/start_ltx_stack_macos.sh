@@ -16,5 +16,6 @@ if [[ ! -f "$CUSTOM_NODE/__init__.py" ]]; then
     exit 1
 fi
 
+export HF_HUB_OFFLINE=1
 cd "$ROOT_DIR"
 exec "$PYTHON" main.py --listen 127.0.0.1 --port 8188 --preview-method auto

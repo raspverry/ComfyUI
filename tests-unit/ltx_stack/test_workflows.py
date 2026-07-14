@@ -108,4 +108,5 @@ def test_recurring_character_builds_bf16_reference_sheet_and_ingredients_video()
     assert prompt.startswith("Reference sheet:")
     assert "\n\nGenerated video:" in prompt
     assert "30-year-old adult woman" in prompt
+    assert "photorealistic" in prompt.lower()
     assert all(term in prompt.lower() for term in ("camera", "says", "ambient"))

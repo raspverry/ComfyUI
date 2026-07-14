@@ -15,6 +15,7 @@ from comfy.comfy_api_env import normalize_comfy_api_base
 from comfy.deploy_environment import get_deploy_environment
 from comfy.model_management import processing_interrupted
 from comfy_api.latest import IO
+from comfy_execution.utils import get_executing_context
 from comfyui_version import __version__ as comfyui_version
 
 from .common_exceptions import ProcessingInterrupted
@@ -62,6 +63,7 @@ def get_comfy_api_headers(node_cls: type[IO.ComfyNode]) -> dict[str, str]:
         "Comfy-Env": get_deploy_environment(),
         "Comfy-Usage-Source": get_usage_source(node_cls),
         "Comfy-Core-Version": comfyui_version,
+        "Comfy-Job-Id": get_executing_context().prompt_id,
     }
 
 

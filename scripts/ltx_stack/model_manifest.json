@@ -1,0 +1,141 @@
+{
+  "z_image_turbo": {
+    "repo_id": "Comfy-Org/z_image_turbo",
+    "required": true,
+    "gated": false,
+    "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+    "files": [
+      {
+        "filename": "split_files/diffusion_models/z_image_turbo_bf16.safetensors",
+        "destination": "models/diffusion_models/z_image_turbo_bf16.safetensors"
+      },
+      {
+        "filename": "split_files/text_encoders/qwen_3_4b.safetensors",
+        "destination": "models/text_encoders/qwen_3_4b.safetensors"
+      },
+      {
+        "filename": "split_files/vae/ae.safetensors",
+        "destination": "models/vae/ae.safetensors"
+      }
+    ]
+  },
+  "flux2_klein_4b": {
+    "repo_id": "black-forest-labs/FLUX.2-klein-4B",
+    "required": true,
+    "gated": false,
+    "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+    "files": [
+      {
+        "filename": "flux-2-klein-4b.safetensors",
+        "destination": "models/diffusion_models/flux-2-klein-4b.safetensors"
+      },
+      {
+        "filename": "split_files/vae/flux2-vae.safetensors",
+        "destination": "models/vae/flux2-vae.safetensors",
+        "repo_id": "Comfy-Org/flux2-dev"
+      }
+    ],
+    "shared_dependencies": [
+      "models/text_encoders/qwen_3_4b.safetensors"
+    ]
+  },
+  "ltx_2_3_q8": {
+    "repo_id": "dgrauet/ltx-2.3-mlx-q8",
+    "destination": "models/ltx/ltx-2.3-mlx-q8",
+    "required": true,
+    "gated": false,
+    "license_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+    "files": [
+      {
+        "filename": "config.json",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/config.json"
+      },
+      {
+        "filename": "embedded_config.json",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/embedded_config.json"
+      },
+      {
+        "filename": "quantize_config.json",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/quantize_config.json"
+      },
+      {
+        "filename": "split_model.json",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/split_model.json"
+      },
+      {
+        "filename": "connector.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/connector.safetensors"
+      },
+      {
+        "filename": "transformer-dev.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/transformer-dev.safetensors"
+      },
+      {
+        "filename": "transformer-distilled-1.1.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/transformer-distilled-1.1.safetensors"
+      },
+      {
+        "filename": "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
+      },
+      {
+        "filename": "spatial_upscaler_x2_v1_1.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/spatial_upscaler_x2_v1_1.safetensors"
+      },
+      {
+        "filename": "spatial_upscaler_x2_v1_1_config.json",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/spatial_upscaler_x2_v1_1_config.json"
+      },
+      {
+        "filename": "vae_encoder.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/vae_encoder.safetensors"
+      },
+      {
+        "filename": "vae_decoder.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/vae_decoder.safetensors"
+      },
+      {
+        "filename": "audio_vae.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/audio_vae.safetensors"
+      },
+      {
+        "filename": "vocoder.safetensors",
+        "destination": "models/ltx/ltx-2.3-mlx-q8/vocoder.safetensors"
+      }
+    ],
+    "text_encoder": {
+      "repo_id": "mlx-community/gemma-3-12b-it-4bit",
+      "destination": "huggingface_cache",
+      "required": true,
+      "gated": false,
+      "license_url": "https://ai.google.dev/gemma/terms",
+      "files": [
+        "added_tokens.json",
+        "chat_template.json",
+        "config.json",
+        "generation_config.json",
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors",
+        "model.safetensors.index.json",
+        "preprocessor_config.json",
+        "processor_config.json",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer.model",
+        "tokenizer_config.json"
+      ]
+    }
+  },
+  "ingredients": {
+    "repo_id": "Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients",
+    "required": false,
+    "gated": true,
+    "license_url": "https://github.com/Lightricks/LTX-2/blob/main/LICENSE",
+    "files": [
+      {
+        "filename": "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+        "destination": "models/loras/ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors"
+      }
+    ]
+  }
+}

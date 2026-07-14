@@ -1451,7 +1451,7 @@ def cast_to_gathered(tensors, r, non_blocking=False, stream=None, r2=None):
             dest2_view = dest2_views.pop(0) if dest2_views is not None else None
             if tensor is None:
                 continue
-            if comfy.memory_management.read_tensor_file_slice_into(tensor, dest_view, stream=stream, destination2=dest2_view):
+            if args.fast_disk and comfy.memory_management.read_tensor_file_slice_into(tensor, dest_view, stream=stream, destination2=dest2_view):
                 continue
             storage = tensor._qdata.untyped_storage() if isinstance(tensor, comfy.quant_ops.QuantizedTensor) else tensor.untyped_storage()
             mark_mmap_dirty(storage)
